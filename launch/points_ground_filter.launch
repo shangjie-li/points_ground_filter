@@ -1,0 +1,22 @@
+<?xml version="1.0"?>
+
+<launch>
+    
+    <node pkg="points_ground_filter" type="points_ground_filter_node" name="points_ground_filter_node" output="screen">
+        
+        <param name="sub_topic" value="/rslidar_points_processed"/>
+        <param name="pub_ground_topic" value="/rslidar_points_ground"/>
+        <param name="pub_no_ground_topic" value="/rslidar_points_no_ground"/>
+        
+        <param name="show_points_size" value="true"/>
+        
+        <param name="radial_divider_angle" value="0.2"/>
+        <param name="sensor_height" value="2.05"/>
+        
+        <param name="concentric_divider_distance" value="0.2"/>
+        <param name="local_max_slope" value="8"/>
+        <param name="general_max_slope" value="6"/>
+        
+    </node>
+
+</launch>
