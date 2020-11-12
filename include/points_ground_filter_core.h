@@ -7,6 +7,8 @@
 #include <pcl/conversions.h>
 #include <pcl_ros/transforms.h>
 
+#include <pcl/filters/statistical_outlier_removal.h>
+#include <pcl/filters/voxel_grid.h>
 #include <pcl/filters/extract_indices.h>
 
 #include <sensor_msgs/PointCloud2.h>
@@ -23,19 +25,28 @@ private:
     
     bool show_points_size_;
 
-    float radial_divider_angle_;
     float sensor_height_;
-    
+    float radial_divider_angle_;
     float concentric_divider_distance_;
-    float local_max_slope_; //max slope of the ground between points, degree
-    float general_max_slope_; //max slope of the ground in entire point cloud, degree
+   
+    float local_threshold_ratio_;
+    float min_local_threshold_;
+    float general_threshold_ratio_;
+    float min_general_threshold_;
+    float reclass_distance_;
     
-    float min_height_threshold;
-    float reclass_distance_threshold;
-    size_t radial_dividers_num;
+    bool ground_filter_mode_;
+    float ground_meank_;
+    float ground_stdmul_;
+    
+    bool no_ground_filter_mode_;
+    float no_ground_meank_;
+    float no_ground_stdmul_;
 
     ros::Subscriber sub_pointcloud;
     ros::Publisher pub_pointcloud_ground, pub_pointcloud_no_ground;
+    
+    size_t radial_dividers_num;
     
     struct PointXYZRTColor
     {

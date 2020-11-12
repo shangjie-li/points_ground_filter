@@ -7,21 +7,31 @@ PointsGroundFilter::PointsGroundFilter(ros::NodeHandle &nh)
     nh.param<std::string>("pub_no_ground_topic", pub_no_ground_topic_, "/rslidar_points_no_ground");
     
     nh.param<bool>("show_points_size", show_points_size_, false);
-    
-    nh.param<float>("radial_divider_angle", radial_divider_angle_, 0.2);
+
     nh.param<float>("sensor_height", sensor_height_, 1.8);
-    
+    nh.param<float>("radial_divider_angle", radial_divider_angle_, 0.2);
     nh.param<float>("concentric_divider_distance", concentric_divider_distance_, 0.1);
-    nh.param<float>("local_max_slope", local_max_slope_, 8);
-    nh.param<float>("general_max_slope", general_max_slope_, 5);
     
-    min_height_threshold = 0.02;
-    reclass_distance_threshold = 0.2;
-    radial_dividers_num = ceil(360 / radial_divider_angle_);
+
+    nh.param<float>("local_threshold_ratio", local_threshold_ratio_, 0.01);
+    nh.param<float>("min_local_threshold", min_local_threshold_, 0.05);
+    nh.param<float>("general_threshold_ratio", general_threshold_ratio_, 0.02);
+    nh.param<float>("min_general_threshold", min_general_threshold_, 0.15);
+    nh.param<float>("reclass_distance", reclass_distance_, 0.2);
+    
+    nh.param<bool>("ground_filter_mode", ground_filter_mode_, false);
+    nh.param<float>("ground_meank", ground_meank_, 10);
+    nh.param<float>("ground_stdmul", ground_stdmul_, 0.2);
+    
+    nh.param<bool>("no_ground_filter_mode", no_ground_filter_mode_, false);
+    nh.param<float>("no_ground_meank", no_ground_meank_, 10);
+    nh.param<float>("no_ground_stdmul", no_ground_stdmul_, 0.2);
     
     sub_pointcloud = nh.subscribe(sub_topic_, 1, &PointsGroundFilter::point_cb, this);
     pub_pointcloud_ground = nh.advertise<sensor_msgs::PointCloud2>(pub_ground_topic_, 1);
     pub_pointcloud_no_ground = nh.advertise<sensor_msgs::PointCloud2>(pub_no_ground_topic_, 1);
+    
+    radial_dividers_num = ceil(360 / radial_divider_angle_);
     
     ros::spin();
 }
@@ -64,12 +74,12 @@ void PointsGroundFilter::XYZ_to_RTZColor(const pcl::PointCloud<pcl::PointXYZ>::P
 
         out_organized_points[i] = new_point;
 
-        //radial divisions更加角度的微分组织射线
+        //按角度的微分组织射线
         out_radial_divided_indices[radial_div].indices.push_back(i);
 
         out_radial_ordered_clouds[radial_div].push_back(new_point);
 
-    } //end for
+    }
 
     //将同一根射线上的点按照半径（距离）排序
 #pragma omp for
@@ -87,31 +97,30 @@ void PointsGroundFilter::classify_pc(std::vector<PointCloudXYZRTColor> &in_radia
     out_ground_indices.indices.clear();
     out_no_ground_indices.indices.clear();
 #pragma omp for
-    for (size_t i = 0; i < in_radial_ordered_clouds.size(); i++) //sweep through each radial division 遍历每一根射线
+    //遍历每一根射线
+    for (size_t i = 0; i < in_radial_ordered_clouds.size(); i++)
     {
         float prev_radius = 0.f;
         float prev_height = -sensor_height_;
         bool prev_ground = false;
         bool current_ground = false;
-        for (size_t j = 0; j < in_radial_ordered_clouds[i].size(); j++) //loop through each point in the radial div
+        //遍历射线上的每一个点
+        for (size_t j = 0; j < in_radial_ordered_clouds[i].size(); j++) 
         {
-            float points_distance = in_radial_ordered_clouds[i][j].radius - prev_radius;
-            float height_threshold = tan(DEG2RAD(local_max_slope_)) * points_distance;
             float current_height = in_radial_ordered_clouds[i][j].point.z;
-            float general_height_threshold = tan(DEG2RAD(general_max_slope_)) * in_radial_ordered_clouds[i][j].radius;
+            //当前点与前一个点的距离
+            float points_distance = in_radial_ordered_clouds[i][j].radius - prev_radius;
+            //当前点与前一个点高度差的阈值
+            float locoal_height_threshold = local_threshold_ratio_ * in_radial_ordered_clouds[i][j].radius + min_local_threshold_;
+            //当前点与地面距离的阈值
+            float general_height_threshold = general_threshold_ratio_ * in_radial_ordered_clouds[i][j].radius + min_general_threshold_;
 
-            //for points which are very close causing the height threshold to be tiny, set a minimum value
-            if (points_distance > concentric_divider_distance_ && height_threshold < min_height_threshold)
+            //若当前点与前一个点高度相近
+            if (current_height <= (prev_height + locoal_height_threshold) && current_height >= (prev_height - locoal_height_threshold))
             {
-                height_threshold = min_height_threshold;
-            }
-
-            //check current point height against the LOCAL threshold (previous point)
-            if (current_height <= (prev_height + height_threshold) && current_height >= (prev_height - height_threshold))
-            {
-                //Check again using general geometry (radius from origin) if previous points wasn't ground
                 if (!prev_ground)
                 {
+                    //判断当前点与地面距离
                     if (current_height <= (-sensor_height_ + general_height_threshold) && current_height >= (-sensor_height_ - general_height_threshold))
                     {
                         current_ground = true;
@@ -126,11 +135,13 @@ void PointsGroundFilter::classify_pc(std::vector<PointCloudXYZRTColor> &in_radia
                     current_ground = true;
                 }
             }
+            //若当前点与前一个点高度不相近
             else
             {
-                //check if previous point is too far from previous one, if so classify again
-                if (points_distance > reclass_distance_threshold &&
-                    (current_height <= (-sensor_height_ + height_threshold) && current_height >= (-sensor_height_ - height_threshold)))
+                //判断是否存在高度突变
+                //判断当前点与地面距离
+                if (points_distance > reclass_distance_ &&
+                    (current_height <= (-sensor_height_ + general_height_threshold) && current_height >= (-sensor_height_ - general_height_threshold)))
                 {
                     current_ground = true;
                 }
@@ -201,15 +212,46 @@ void PointsGroundFilter::point_cb(const sensor_msgs::PointCloud2ConstPtr &in_clo
     extract_ground.setNegative(true); //true removes the indices, false leaves only the indices
     extract_ground.filter(*no_ground_cloud_ptr);
     
+    pcl::PointCloud<pcl::PointXYZ>::Ptr filtered_ground_cloud_ptr(new pcl::PointCloud<pcl::PointXYZ>);
+    pcl::PointCloud<pcl::PointXYZ>::Ptr filtered_no_ground_cloud_ptr(new pcl::PointCloud<pcl::PointXYZ>);
+    
+    //for ground_cloud_ptr
+    if (ground_filter_mode_)
+    {
+        pcl::StatisticalOutlierRemoval<pcl::PointXYZ> statFilter_ground;
+        statFilter_ground.setInputCloud(ground_cloud_ptr);
+        statFilter_ground.setMeanK(ground_meank_);
+        statFilter_ground.setStddevMulThresh(ground_stdmul_);
+        statFilter_ground.filter(*filtered_ground_cloud_ptr);
+    }
+    else
+    {
+        filtered_ground_cloud_ptr = ground_cloud_ptr;
+    }
+    
+    //for no_ground_cloud_ptr
+    if (no_ground_filter_mode_)
+    {
+        pcl::StatisticalOutlierRemoval<pcl::PointXYZ> statFilter_no_ground;
+        statFilter_no_ground.setInputCloud(no_ground_cloud_ptr);
+        statFilter_no_ground.setMeanK(no_ground_meank_);
+        statFilter_no_ground.setStddevMulThresh(no_ground_stdmul_);
+        statFilter_no_ground.filter(*filtered_no_ground_cloud_ptr);
+    }
+    else
+    {
+        filtered_no_ground_cloud_ptr = no_ground_cloud_ptr;
+    }
+    
     if (show_points_size_)
     {
-        std::cout<<"points_size of ground_cloud_ptr:"<<ground_cloud_ptr->points.size()<<std::endl;
-        std::cout<<"points_size of no_ground_cloud_ptr:"<<no_ground_cloud_ptr->points.size()<<std::endl;
+        std::cout<<"points_size of filtered_ground_cloud_ptr:"<<filtered_ground_cloud_ptr->points.size()<<std::endl;
+        std::cout<<"points_size of filtered_no_ground_cloud_ptr:"<<filtered_no_ground_cloud_ptr->points.size()<<std::endl;
         std::cout<<std::endl;
     }
 
-    publish_cloud(pub_pointcloud_ground, ground_cloud_ptr, in_cloud_ptr->header);
-    publish_cloud(pub_pointcloud_no_ground, no_ground_cloud_ptr, in_cloud_ptr->header);
+    publish_cloud(pub_pointcloud_ground, filtered_ground_cloud_ptr, in_cloud_ptr->header);
+    publish_cloud(pub_pointcloud_no_ground, filtered_no_ground_cloud_ptr, in_cloud_ptr->header);
 }
 
 

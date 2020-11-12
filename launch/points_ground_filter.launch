@@ -10,12 +10,23 @@
         
         <param name="show_points_size" value="true"/>
         
-        <param name="radial_divider_angle" value="0.2"/>
         <param name="sensor_height" value="2.05"/>
+        <param name="radial_divider_angle" value="0.2"/>
+        <param name="concentric_divider_distance" value="0.1"/>
         
-        <param name="concentric_divider_distance" value="0.2"/>
-        <param name="local_max_slope" value="8"/>
-        <param name="general_max_slope" value="6"/>
+        <param name="local_threshold_ratio" value="0.01"/>
+        <param name="min_local_threshold" value="0.05"/>
+        <param name="general_threshold_ratio" value="0.02"/>
+        <param name="min_general_threshold" value="0.15"/>
+        <param name="reclass_distance" value="0.2"/>
+        
+        <param name="ground_filter_mode" value="true"/>
+        <param name="ground_meank" value="10"/>
+        <param name="ground_stdmul" value="1.0"/>
+        
+        <param name="no_ground_filter_mode" value="true"/>
+        <param name="no_ground_meank" value="10"/>
+        <param name="no_ground_stdmul" value="1.0"/>
         
     </node>
 
