@@ -53,7 +53,7 @@ ROS package for filtering groud points
 ## 运行
  - 启动`points_ground_filter`
    ```Shell
-   roslauch points_ground_filter points_ground_filter.launch
+   roslaunch points_ground_filter points_ground_filter.launch
    ```
 
 ## 说明
