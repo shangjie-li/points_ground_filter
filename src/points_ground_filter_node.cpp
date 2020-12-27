@@ -6,6 +6,8 @@ int main(int argc, char **argv)
     
     ros::NodeHandle nh("~");
     
+    omp_set_num_threads(4);
+    
     PointsGroundFilter core(nh);
     
     return 0;

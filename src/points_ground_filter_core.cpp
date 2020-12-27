@@ -81,8 +81,8 @@ void PointsGroundFilter::XYZ_to_RTZColor(const pcl::PointCloud<pcl::PointXYZ>::P
 
     }
 
-    //将同一根射线上的点按照半径（距离）排序
 #pragma omp for
+    //将同一根射线上的点按照半径（距离）排序
     for (size_t i = 0; i < radial_dividers_num; i++)
     {
         std::sort(out_radial_ordered_clouds[i].begin(), out_radial_ordered_clouds[i].end(),
