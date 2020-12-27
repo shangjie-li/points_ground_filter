@@ -15,9 +15,9 @@ ROS package for filtering groud points
 ## 参数配置
  - 修改`points_ground_filter/launch/points_ground_filter.launch`
    ```Shell
-   <param name="sub_topic" value="/rslidar_points_processed"/>
-   <param name="pub_ground_topic" value="/rslidar_points_ground"/>
-   <param name="pub_no_ground_topic" value="/rslidar_points_no_ground"/>
+   <param name="sub_topic" value="/pandar_points_processed"/>
+   <param name="pub_ground_topic" value="/pandar_points_ground"/>
+   <param name="pub_no_ground_topic" value="/pandar_points_no_ground"/>
         
    <param name="show_points_size" value="true"/>
         
