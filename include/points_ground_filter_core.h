@@ -17,23 +17,19 @@
 
 class PointsGroundFilter
 {
-
 private:
     std::string sub_topic_;
     std::string pub_ground_topic_;
     std::string pub_no_ground_topic_;
     
     bool show_points_size_;
+    bool show_time_;
 
     float sensor_height_;
-    float radial_divider_angle_;
-    float concentric_divider_distance_;
-   
-    float local_threshold_ratio_;
-    float min_local_threshold_;
-    float general_threshold_ratio_;
-    float min_general_threshold_;
-    float reclass_distance_;
+    float radius_divider_;
+    float theta_divider_;
+    float local_height_threshold_;
+    float general_slope_threshold_;
     
     bool ground_filter_mode_;
     float ground_meank_;
@@ -43,39 +39,35 @@ private:
     float no_ground_meank_;
     float no_ground_stdmul_;
 
-    ros::Subscriber sub_pointcloud;
-    ros::Publisher pub_pointcloud_ground, pub_pointcloud_no_ground;
-    
-    size_t radial_dividers_num;
+    ros::Subscriber sub_;
+    ros::Publisher pub_ground_, pub_no_ground_;
     
     struct PointXYZRTColor
     {
         pcl::PointXYZ point;
 
-        float radius; //cylindric coords on XY Plane
-        float theta;  //angle deg on XY plane
+        float radius; //XY平面极坐标系的半径
+        float theta;  //XY平面极坐标系的极角
 
-        size_t radial_div;     //index of the radial divsion to which this point belongs to
-        size_t concentric_div; //index of the concentric division to which this points belongs to
+        size_t radius_idx; //径向索引
+        size_t theta_idx;  //周向索引
 
-        size_t original_index; //index of this point in the source pointcloud
+        size_t original_idx; //在原始点云中的索引
     };
     typedef std::vector<PointXYZRTColor> PointCloudXYZRTColor;
     
-    void point_cb(const sensor_msgs::PointCloud2ConstPtr &in_cloud);
+    void callback(const sensor_msgs::PointCloud2ConstPtr &in);
     
-    void XYZ_to_RTZColor(const pcl::PointCloud<pcl::PointXYZ>::Ptr in_cloud,
-                        PointCloudXYZRTColor &out_organized_points,
-                        std::vector<pcl::PointIndices> &out_radial_divided_indices,
-                        std::vector<PointCloudXYZRTColor> &out_radial_ordered_clouds);
+    void convert_XYZ_to_XYZRTColor(const pcl::PointCloud<pcl::PointXYZ>::Ptr in_pc_ptr,
+                        std::vector<PointCloudXYZRTColor> &out_pc);
     
-    void classify_pc(std::vector<PointCloudXYZRTColor> &in_radial_ordered_clouds,
-                   pcl::PointIndices &out_ground_indices,
-                   pcl::PointIndices &out_no_ground_indices);
+    void classify_pc(std::vector<PointCloudXYZRTColor> &in_pc,
+                        pcl::PointIndices &ground_indices,
+                        pcl::PointIndices &no_ground_indices);
     
-    void publish_cloud(const ros::Publisher &in_publisher,
-                     const pcl::PointCloud<pcl::PointXYZ>::Ptr in_cloud_to_publish_ptr,
-                     const std_msgs::Header &in_header);
+    void publish_pc(const ros::Publisher &pub,
+                        const pcl::PointCloud<pcl::PointXYZ>::Ptr pc_ptr,
+                        const std_msgs::Header &header);
 
 public:
     PointsGroundFilter(ros::NodeHandle &nh);
