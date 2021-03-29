@@ -12,7 +12,8 @@ PointsGroundFilter::PointsGroundFilter(ros::NodeHandle &nh)
     nh.param<float>("sensor_height", sensor_height_, 2.0);
     nh.param<float>("radius_divider", radius_divider_, 0.15);
     nh.param<float>("theta_divider", theta_divider_, 0.4);
-    nh.param<float>("local_height_threshold", local_height_threshold_, 0.2);
+    nh.param<float>("curb_height_threshold", curb_height_threshold_, 0.05);
+    nh.param<float>("obstacle_height_threshold", obstacle_height_threshold_, 0.2);
     nh.param<float>("general_slope_threshold", general_slope_threshold_, 2);
     
     nh.param<bool>("ground_filter_mode", ground_filter_mode_, false);
@@ -71,7 +72,7 @@ void PointsGroundFilter::convert_XYZ_to_XYZRTColor(const pcl::PointCloud<pcl::Po
         out_pc[theta_idx].push_back(new_point);
     }
 
-    //将同一根射线上的点按照半径排序
+    //将同一条射线上的点按照半径排序
     #pragma omp for
     for (size_t i = 0; i < num; i++)
     {
@@ -81,10 +82,10 @@ void PointsGroundFilter::convert_XYZ_to_XYZRTColor(const pcl::PointCloud<pcl::Po
 
 void PointsGroundFilter::classify_pc(std::vector<PointCloudXYZRTColor> &in_pc,
                                     pcl::PointIndices &ground_indices,
-                                    pcl::PointIndices &no_ground_indices)
+                                    pcl::PointIndices &obstacle_indices)
 {
     ground_indices.indices.clear();
-    no_ground_indices.indices.clear();
+    obstacle_indices.indices.clear();
     
     //遍历每一条射线
     #pragma omp for
@@ -93,6 +94,7 @@ void PointsGroundFilter::classify_pc(std::vector<PointCloudXYZRTColor> &in_pc,
         float pre_radius = 0;
         float pre_z = - sensor_height_;
         bool pre_ground = true;
+        bool pre_obstacle = false;
         
         //遍历射线上的每一个点
         for (size_t j = 0; j < in_pc[i].size(); j++) 
@@ -100,56 +102,63 @@ void PointsGroundFilter::classify_pc(std::vector<PointCloudXYZRTColor> &in_pc,
             float cur_radius = in_pc[i][j].radius;
             float cur_z = in_pc[i][j].point.z;
             bool cur_ground;
-            
-            //当前点与前一个点的距离
-            float distance = cur_radius - pre_radius;
+            bool cur_obstacle;
 
-            //局部高度阈值
-            float loc_height_th = local_height_threshold_;
-            if (j == 0) {loc_height_th = 2 * loc_height_th;}
-            
             //abs(x)对int变量求绝对值
             //fabs(x)对float变量或double变量求绝对值
-            
-            //全局高度阈值
-            float gen_height_th = fabs(cur_radius * general_slope_threshold_ * PI / 180) + loc_height_th;
 
-            //若当前点与前一个点高度相近
-            if (fabs(pre_z - cur_z) <= loc_height_th)
+            //全局高度阈值
+            float gen_height_th = fabs(cur_radius * general_slope_threshold_ * PI / 180);
+
+            //局部高度阈值
+            float curb_height_th;
+            if (j == 0) {curb_height_th = gen_height_th;}
+            else {curb_height_th = curb_height_threshold_;}
+            float obstacle_height_th;
+            if (j == 0) {obstacle_height_th = gen_height_th;}
+            else {obstacle_height_th = obstacle_height_threshold_;}
+            
+            //若当前点与前一个点高度相近，高度差不超过curb_height_th
+            if (fabs(pre_z - cur_z) <= curb_height_th)
             {
                 if (pre_ground) {cur_ground = true;}
-                else
-                {
-                    //判断当前点与地面距离
-                    if (fabs(- sensor_height_ - cur_z) <= gen_height_th) {cur_ground = true;}
-                    else {cur_ground = false;}
-                }
+                else {cur_ground = false;}
             }
-            //若当前点与前一个点高度不相近
             else
             {
-                if (pre_ground) {cur_ground = false;}
+                cur_ground = false;
+            }
+
+            //若当前点与前一个点高度相近，高度差不超过obstacle_height_th
+            if (fabs(pre_z - cur_z) <= obstacle_height_th)
+            {
+                if (!pre_obstacle) {cur_obstacle = false;}
                 else
                 {
                     //判断当前点与地面距离
-                    if (fabs(- sensor_height_ - cur_z) <= gen_height_th) {cur_ground = true;}
-                    else {cur_ground = false;}
+                    if (fabs(- sensor_height_ - cur_z) <= gen_height_th) {cur_obstacle = false;}
+                    else {cur_obstacle = true;}
+                }
+            }
+            else
+            {
+                if (!pre_obstacle) {cur_obstacle = true;}
+                else
+                {
+                    //判断当前点与地面距离
+                    if (fabs(- sensor_height_ - cur_z) <= gen_height_th) {cur_obstacle = false;}
+                    else {cur_obstacle = true;}
                 }
             }
 
             //提取索引
-            if (cur_ground)
-            {
-                ground_indices.indices.push_back(in_pc[i][j].original_idx);
-            }
-            else
-            {
-                no_ground_indices.indices.push_back(in_pc[i][j].original_idx);
-            }
+            if (cur_ground) {ground_indices.indices.push_back(in_pc[i][j].original_idx);}
+            if (cur_obstacle) {obstacle_indices.indices.push_back(in_pc[i][j].original_idx);}
 
             pre_radius = cur_radius;
             pre_z = cur_z;
             pre_ground = cur_ground;
+            pre_obstacle = cur_obstacle;
         }
     }
 }
