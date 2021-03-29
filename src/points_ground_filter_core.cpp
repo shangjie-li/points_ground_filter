@@ -252,8 +252,6 @@ void PointsGroundFilter::callback(const sensor_msgs::PointCloud2ConstPtr &in)
     if (show_time_)
     {
         std::cout<<"cost time:"<<time_end - time_start<<"s"<<std::endl;
-        std::cout<<"cost time:"<<time_end - time_start<<"s"<<std::endl;
-        std::cout<<"cost time:"<<time_end - time_start<<"s"<<std::endl;
     }
 
     publish_pc(pub_ground_, filtered_ground_pc_ptr, in->header);
