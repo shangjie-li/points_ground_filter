@@ -5,6 +5,7 @@ PointsGroundFilter::PointsGroundFilter(ros::NodeHandle &nh)
     nh.param<std::string>("sub_topic", sub_topic_, "/rslidar_points");
     nh.param<std::string>("pub_ground_topic", pub_ground_topic_, "/rslidar_points_ground");
     nh.param<std::string>("pub_no_ground_topic", pub_no_ground_topic_, "/rslidar_points_no_ground");
+    nh.param<std::string>("pub_marker_topic", pub_marker_topic_, "/feasible_region");
     
     nh.param<bool>("show_points_size", show_points_size_, false);
     nh.param<bool>("show_time", show_time_, false);
@@ -27,6 +28,7 @@ PointsGroundFilter::PointsGroundFilter(ros::NodeHandle &nh)
     sub_ = nh.subscribe(sub_topic_, 1, &PointsGroundFilter::callback, this);
     pub_ground_ = nh.advertise<sensor_msgs::PointCloud2>(pub_ground_topic_, 1);
     pub_no_ground_ = nh.advertise<sensor_msgs::PointCloud2>(pub_no_ground_topic_, 1);
+    pub_marker_ = nh.advertise<visualization_msgs::Marker>(pub_marker_topic_, 1);
     
     ros::spin();
 }
@@ -162,7 +164,6 @@ void PointsGroundFilter::classify_pc(std::vector<PointCloudXYZRTColor> &in_pc,
         }
     }
 }
-
 void PointsGroundFilter::publish_pc(const ros::Publisher &pub,
                                     const pcl::PointCloud<pcl::PointXYZ>::Ptr pc_ptr,
                                     const std_msgs::Header &header)
@@ -171,6 +172,131 @@ void PointsGroundFilter::publish_pc(const ros::Publisher &pub,
     pcl::toROSMsg(*pc_ptr, pc_msg);
     pc_msg.header = header;
     pub.publish(pc_msg);
+}
+
+void PointsGroundFilter::publish_marker(const ros::Publisher &pub,
+                                        const pcl::PointCloud<pcl::PointXYZ>::Ptr in_pc_ptr,
+                                        visualization_msgs::Marker &region,
+                                        std_msgs::Header header)
+{
+    std::vector<PointR> pc;
+    size_t num = ceil(360 / theta_divider_);
+
+    //初始化PointXYZRTColor型数组，元素的索引由极角决定
+    #pragma omp for
+    for (size_t p = 0; p < num; p++)
+    {
+        PointR new_point;
+        new_point.radius = 0;
+        new_point.point.x = 0;
+        new_point.point.y = 0;
+        new_point.point.z = - sensor_height_;
+        pc.push_back(new_point);
+    }
+
+    //将最远点作为数组中每个极角对应的元素
+    #pragma omp for
+    for (size_t i = 0; i < in_pc_ptr->points.size(); i++)
+    {
+        auto radius = (float)sqrt(in_pc_ptr->points[i].x * in_pc_ptr->points[i].x + in_pc_ptr->points[i].y * in_pc_ptr->points[i].y);
+        auto theta = (float)atan2(in_pc_ptr->points[i].y, in_pc_ptr->points[i].x) * 180 / PI;
+        if (theta < 0) {theta += 360;}
+
+        auto theta_idx = (size_t)floor(theta / theta_divider_);
+
+        if (radius > pc[theta_idx].radius)
+        {
+            pc[theta_idx].radius = radius;
+            pc[theta_idx].point.x = in_pc_ptr->points[i].x;
+            pc[theta_idx].point.y = in_pc_ptr->points[i].y;
+            pc[theta_idx].point.z = - sensor_height_;
+        }
+    }
+
+    //数据平滑
+    int n = 5;
+    int iter_num = num / n;
+    for (size_t iter = 0; iter < iter_num; iter++)
+    {
+        std::vector<float> radiuses(n);
+        std::vector<int> assoes(n);
+        for (size_t j = 0; j < n; j++)
+        {
+            radiuses[j] = pc[iter * n + j].radius;
+            assoes[j] = 0;
+        }
+
+        float threshold = 2.0;
+        for (size_t j = 0; j < n; j++)
+        {
+            for (size_t k = 0; k < n; k++)
+            {
+                float dd = (float)sqrt((radiuses[j] - radiuses[k]) * (radiuses[j] - radiuses[k]));
+                if (dd < threshold) {assoes[j] += 1;}
+            }
+        }
+
+        float radius = 0;
+        int asso = 0;
+        for (size_t j = 0; j < n; j++)
+        {
+            if (assoes[j] >= asso)
+            {
+                radius = radiuses[j];
+                asso = assoes[j];
+            }
+        }
+        
+        for (size_t j = 0; j < n; j++)
+        {
+            float x = radius * cos((iter * n + j) * theta_divider_ * PI / 180);
+            float y = radius * sin((iter * n + j) * theta_divider_ * PI / 180);
+            pc[iter * n + j].point.x = x;
+            pc[iter * n + j].point.y = y;
+        }
+    }
+    
+    geometry_msgs::Point origin;
+    origin.x = 0;
+    origin.y = 0;
+    origin.z = - sensor_height_;
+
+    //用连续三角形表示可行域，计算三角形的顶点
+    for (size_t p = 0; p < num; p++)
+    {
+        region.points.push_back(origin);
+        region.points.push_back(pc[p].point);
+        region.points.push_back(pc[(p + 1) % num].point);
+    }
+
+    region.header = header;
+
+    //设置该标记的命名空间和ID，ID应该是独一无二的
+    //具有相同命名空间和ID的标记将会覆盖前一个
+    region.ns = "feasible_region";
+    region.id = 0;
+    
+    //设置标记类型
+    region.type = visualization_msgs::Marker::TRIANGLE_LIST;
+    
+    //设置标记行为：ADD为添加，DELETE为删除
+    region.action = visualization_msgs::Marker::ADD;
+
+    //设置标记尺寸
+    region.scale.x = 1;
+    region.scale.y = 1;
+    region.scale.z = 1;
+
+    //设置标记颜色，确保不透明度alpha不为0
+    region.color.r = 0.0f;
+    region.color.g = 0.8f;
+    region.color.b = 0.0f;
+    region.color.a = 0.65;
+
+    region.lifetime = ros::Duration(0.1);
+    region.text = ' ';
+
+    pub_marker_.publish(region);
 }
 
 void PointsGroundFilter::callback(const sensor_msgs::PointCloud2ConstPtr &in)
@@ -230,6 +356,11 @@ void PointsGroundFilter::callback(const sensor_msgs::PointCloud2ConstPtr &in)
     int size_ground = filtered_ground_pc_ptr->points.size();
     int size_no_ground = filtered_no_ground_pc_ptr->points.size();
 
+    visualization_msgs::Marker region;
+    publish_pc(pub_ground_, filtered_ground_pc_ptr, in->header);
+    publish_pc(pub_no_ground_, filtered_no_ground_pc_ptr, in->header);
+    publish_marker(pub_marker_, filtered_ground_pc_ptr, region, in->header);
+
     ros::Time time_end = ros::Time::now();
 
     if (show_points_size_ || show_time_)
@@ -247,9 +378,6 @@ void PointsGroundFilter::callback(const sensor_msgs::PointCloud2ConstPtr &in)
     {
         std::cout<<"cost time:"<<time_end - time_start<<"s"<<std::endl;
     }
-
-    publish_pc(pub_ground_, filtered_ground_pc_ptr, in->header);
-    publish_pc(pub_no_ground_, filtered_no_ground_pc_ptr, in->header);
 }
 
 

@@ -1,6 +1,10 @@
 #pragma once
 
 #include <ros/ros.h>
+#include <visualization_msgs/Marker.h>
+#include <visualization_msgs/MarkerArray.h>
+#include <geometry_msgs/Point.h>
+#include <std_msgs/Header.h>
 
 #include <pcl_conversions/pcl_conversions.h>
 #include <pcl/point_types.h>
@@ -21,6 +25,7 @@ private:
     std::string sub_topic_;
     std::string pub_ground_topic_;
     std::string pub_no_ground_topic_;
+    std::string pub_marker_topic_;
     
     bool show_points_size_;
     bool show_time_;
@@ -41,7 +46,7 @@ private:
     float no_ground_stdmul_;
 
     ros::Subscriber sub_;
-    ros::Publisher pub_ground_, pub_no_ground_;
+    ros::Publisher pub_ground_, pub_no_ground_, pub_marker_;
     
     struct PointXYZRTColor
     {
@@ -55,6 +60,14 @@ private:
 
         size_t original_idx; //在原始点云中的索引
     };
+
+    struct PointR
+    {
+        geometry_msgs::Point point;
+
+        float radius; //XY平面极坐标系的半径
+    };
+
     typedef std::vector<PointXYZRTColor> PointCloudXYZRTColor;
     
     void callback(const sensor_msgs::PointCloud2ConstPtr &in);
@@ -65,10 +78,15 @@ private:
     void classify_pc(std::vector<PointCloudXYZRTColor> &in_pc,
                         pcl::PointIndices &ground_indices,
                         pcl::PointIndices &no_ground_indices);
-    
+
     void publish_pc(const ros::Publisher &pub,
                         const pcl::PointCloud<pcl::PointXYZ>::Ptr pc_ptr,
                         const std_msgs::Header &header);
+    
+    void publish_marker(const ros::Publisher &pub,
+                        const pcl::PointCloud<pcl::PointXYZ>::Ptr in_pc_ptr,
+                        visualization_msgs::Marker &region,
+                        std_msgs::Header header);
 
 public:
     PointsGroundFilter(ros::NodeHandle &nh);
