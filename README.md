@@ -25,8 +25,9 @@ ROS package for filtering groud points
    <param name="sensor_height" value="2.0"/>
    <param name="radius_divider" value="0.15"/>
    <param name="theta_divider" value="0.4"/>
-   <param name="local_height_threshold" value="0.2"/>
-   <param name="general_slope_threshold" value="2"/>
+   <param name="curb_height_threshold" value="0.05"/>
+   <param name="obstacle_height_threshold" value="0.20"/>
+   <param name="general_slope_threshold" value="4"/>
 
    <param name="ground_filter_mode" value="false"/>
    <param name="ground_meank" value="5"/>
@@ -42,7 +43,8 @@ ROS package for filtering groud points
     - `sensor_height`指明传感器距地面高度，单位为米。
     - `radius_divider`为径向距离单元的长度，单位为米。
     - `theta_divider`为激光雷达水平角分辨率，单位为度。
-    - `local_height_threshold`为局部高度阈值，单位为米。
+    - `curb_height_threshold`为路沿高度阈值，单位为米。
+    - `obstacle_height_threshold`为障碍物高度阈值，单位为米。
     - `general_slope_threshold`为全局坡度阈值，单位为度。
 
 ## 运行
