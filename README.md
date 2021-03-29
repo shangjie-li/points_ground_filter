@@ -18,6 +18,7 @@ ROS package for filtering groud points
    <param name="sub_topic" value="/pandar_points_processed"/>
    <param name="pub_ground_topic" value="/pandar_points_ground"/>
    <param name="pub_no_ground_topic" value="/pandar_points_no_ground"/>
+   <param name="pub_marker_topic" value="/feasible_region"/>
         
    <param name="show_points_size" value="true"/>
    <param name="show_time" value="true"/>
@@ -40,7 +41,8 @@ ROS package for filtering groud points
     - `sub_topic`指明订阅的点云话题。
     - `pub_ground_topic`指明发布的只包含地面点云的点云话题。
     - `pub_no_ground_topic`指明发布的不包含地面点云的点云话题。
-    - `sensor_height`指明传感器距地面高度，单位为米。
+    - `pub_marker_topic`指明发布的可行域话题，类型为Marker，可以通过rviz查看。
+    - `sensor_height`为传感器距地面高度，单位为米。
     - `radius_divider`为径向距离单元的长度，单位为米。
     - `theta_divider`为激光雷达水平角分辨率，单位为度。
     - `curb_height_threshold`为路沿高度阈值，单位为米。
