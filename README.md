@@ -22,9 +22,14 @@ ROS package for filtering groud points
    <param name="show_points_size" value="true"/>
    <param name="show_time" value="true"/>
 
-   <param name="sensor_height" value="2.0"/>
    <param name="radius_divider" value="0.15"/>
+   <param name="radius_min" value="1.5"/>
+   <param name="radius_max" value="50"/>
    <param name="theta_divider" value="0.4"/>
+   <param name="theta_min" value="0"/>
+   <param name="theta_max" value="360"/>
+
+   <param name="sensor_height" value="2.0"/>
    <param name="local_height_threshold" value="0.2"/>
    <param name="general_slope_threshold" value="2"/>
 

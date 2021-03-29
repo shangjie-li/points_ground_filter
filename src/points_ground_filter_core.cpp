@@ -9,9 +9,15 @@ PointsGroundFilter::PointsGroundFilter(ros::NodeHandle &nh)
     nh.param<bool>("show_points_size", show_points_size_, false);
     nh.param<bool>("show_time", show_time_, false);
 
-    nh.param<float>("sensor_height", sensor_height_, 2.0);
+    
     nh.param<float>("radius_divider", radius_divider_, 0.15);
+    nh.param<float>("radius_min", radius_min_, 1.5);
+    nh.param<float>("radius_max", radius_max_, 50);
     nh.param<float>("theta_divider", theta_divider_, 0.4);
+    nh.param<float>("theta_min", theta_min_, 0);
+    nh.param<float>("theta_max", theta_max_, 360);
+    
+    nh.param<float>("sensor_height", sensor_height_, 2.0);
     nh.param<float>("local_height_threshold", local_height_threshold_, 0.2);
     nh.param<float>("general_slope_threshold", general_slope_threshold_, 2);
     
@@ -34,21 +40,25 @@ PointsGroundFilter::~PointsGroundFilter(){}
 
 void PointsGroundFilter::Spin(){}
 
-void PointsGroundFilter::convert_XYZ_to_XYZRTColor(const pcl::PointCloud<pcl::PointXYZ>::Ptr in_pc_ptr,
-                                    std::vector<PointCloudXYZRTColor> &out_pc)
+void PointsGroundFilter::convert_pc(const pcl::PointCloud<pcl::PointXYZ>::Ptr in_pc_ptr,
+                                    std::vector<PointCloudInLine> &out_pc)
 {
     //floor(x)返回小于或等于x的最大整数
     //ceil(x)返回大于x的最小整数
-    size_t num = ceil(360 / theta_divider_);
+    size_t num_r = ceil((radius_max_ - radius_min_) / radius_divider_);
+    size_t num_t = ceil((theta_max_ - theta_min_) / theta_divider_);
 
-    //out_pc中包含num条射线，每条射线都是PointXYZRTColor型点云
-    out_pc.resize(num);
+    //out_pc中包含num_t条射线，每条射线都是PointCloudInCell型子云
+    out_pc.resize(num_t);
+    for (size_t line = 0; line < num_t; line++)
+    {
+        out_pc[line].resize(num_r);
+    }
 
     //以射线的形式组织点云
     #pragma omp for
     for (size_t i = 0; i < in_pc_ptr->points.size(); i++)
     {
-        PointXYZRTColor new_point;
         auto radius = (float)sqrt(in_pc_ptr->points[i].x * in_pc_ptr->points[i].x + in_pc_ptr->points[i].y * in_pc_ptr->points[i].y);
         auto theta = (float)atan2(in_pc_ptr->points[i].y, in_pc_ptr->points[i].x) * 180 / PI;
         if (theta < 0)
@@ -57,29 +67,29 @@ void PointsGroundFilter::convert_XYZ_to_XYZRTColor(const pcl::PointCloud<pcl::Po
         }
 
         //径向微分
-        auto radius_idx = (size_t)floor(radius / radius_divider_);
+        auto radius_idx = (size_t)floor((radius - radius_min_) / radius_divider_);
         //周向微分
-        auto theta_idx = (size_t)floor(theta / theta_divider_);
+        auto theta_idx = (size_t)floor((theta - theta_min_) / theta_divider_);
 
-        new_point.point = in_pc_ptr->points[i];
-        new_point.radius = radius;
-        new_point.theta = theta;
-        new_point.radius_idx = radius_idx;
-        new_point.theta_idx = theta_idx;
-        new_point.original_idx = i;
+        if (radius_idx < 0 || theta_idx < 0) {continue;}
+        if (radius_idx >= num_r || theta_idx >= num_t) {continue;}
 
-        out_pc[theta_idx].push_back(new_point);
-    }
-
-    //将同一根射线上的点按照半径排序
-    #pragma omp for
-    for (size_t i = 0; i < num; i++)
-    {
-        std::sort(out_pc[i].begin(), out_pc[i].end(), [](const PointXYZRTColor &a, const PointXYZRTColor &b) {return a.radius < b.radius;});
+        if (out_pc[theta_idx][radius_idx].original_idxs.size() == 0)
+        {
+            out_pc[theta_idx][radius_idx].original_idxs.push_back(i);
+            out_pc[theta_idx][radius_idx].min_z = in_pc_ptr->points[i].z;
+            out_pc[theta_idx][radius_idx].max_z = in_pc_ptr->points[i].z;
+        }
+        else
+        {
+            out_pc[theta_idx][radius_idx].original_idxs.push_back(i);
+            if (in_pc_ptr->points[i].z < out_pc[theta_idx][radius_idx].min_z) {out_pc[theta_idx][radius_idx].min_z = in_pc_ptr->points[i].z;}
+            if (in_pc_ptr->points[i].z > out_pc[theta_idx][radius_idx].max_z) {out_pc[theta_idx][radius_idx].max_z = in_pc_ptr->points[i].z;}
+        }
     }
 }
 
-void PointsGroundFilter::classify_pc(std::vector<PointCloudXYZRTColor> &in_pc,
+void PointsGroundFilter::classify_pc(std::vector<PointCloudInLine> &in_pc,
                                     pcl::PointIndices &ground_indices,
                                     pcl::PointIndices &no_ground_indices)
 {
@@ -90,66 +100,71 @@ void PointsGroundFilter::classify_pc(std::vector<PointCloudXYZRTColor> &in_pc,
     #pragma omp for
     for (size_t i = 0; i < in_pc.size(); i++)
     {
-        float pre_radius = 0;
-        float pre_z = - sensor_height_;
         bool pre_ground = true;
+        float pre_z = - sensor_height_;
         
-        //遍历射线上的每一个点
+        //局部高度阈值
+        float loc_height_th = 2 * local_height_threshold_;
+        
+        //遍历射线上的每一个子云
         for (size_t j = 0; j < in_pc[i].size(); j++) 
         {
-            float cur_radius = in_pc[i][j].radius;
-            float cur_z = in_pc[i][j].point.z;
+            if (in_pc[i][j].original_idxs.size() == 0) {continue;}
+            
             bool cur_ground;
-            
-            //当前点与前一个点的距离
-            float distance = cur_radius - pre_radius;
+            float min_z = in_pc[i][j].min_z;
+            float max_z = in_pc[i][j].max_z;
+            float cur_z = min_z;
+            float cur_radius = j * radius_divider_ + radius_min_;
 
-            //局部高度阈值
-            float loc_height_th = local_height_threshold_;
-            if (j == 0) {loc_height_th = 2 * loc_height_th;}
-            
             //abs(x)对int变量求绝对值
             //fabs(x)对float变量或double变量求绝对值
-            
+
             //全局高度阈值
-            float gen_height_th = fabs(cur_radius * general_slope_threshold_ * PI / 180) + loc_height_th;
+            float gen_height_th = fabs(cur_radius * general_slope_threshold_ * PI / 180) + local_height_threshold_;
 
-            //若当前点与前一个点高度相近
-            if (fabs(pre_z - cur_z) <= loc_height_th)
+            //若当前子云近似平面
+            if ((max_z - min_z) <= local_height_threshold_)
             {
-                if (pre_ground) {cur_ground = true;}
+                //若当前子云与前一个子云高度相近
+                if (fabs(pre_z - cur_z) <= loc_height_th)
+                {
+                    if (pre_ground) {cur_ground = true;}
+                    else
+                    {
+                        //判断当前子云与地面距离
+                        if (fabs(- sensor_height_ - cur_z) <= gen_height_th) {cur_ground = true;}
+                        else {cur_ground = false;}
+                    }
+                }
+                //若当前子云与前一个子云高度不相近
                 else
                 {
-                    //判断当前点与地面距离
-                    if (fabs(- sensor_height_ - cur_z) <= gen_height_th) {cur_ground = true;}
-                    else {cur_ground = false;}
+                    if (pre_ground) {cur_ground = false;}
+                    else
+                    {
+                        //判断当前子云与地面距离
+                        if (fabs(- sensor_height_ - cur_z) <= gen_height_th) {cur_ground = true;}
+                        else {cur_ground = false;}
+                    }
                 }
             }
-            //若当前点与前一个点高度不相近
-            else
-            {
-                if (pre_ground) {cur_ground = false;}
-                else
-                {
-                    //判断当前点与地面距离
-                    if (fabs(- sensor_height_ - cur_z) <= gen_height_th) {cur_ground = true;}
-                    else {cur_ground = false;}
-                }
-            }
-
+            //若当前子云存在高度突变
+            else {cur_ground = false;}
+            
             //提取索引
             if (cur_ground)
             {
-                ground_indices.indices.push_back(in_pc[i][j].original_idx);
+                for (size_t t = 0; t < in_pc[i][j].original_idxs.size(); t++) {ground_indices.indices.push_back(in_pc[i][j].original_idxs[t]);}
             }
             else
             {
-                no_ground_indices.indices.push_back(in_pc[i][j].original_idx);
+                for (size_t t = 0; t < in_pc[i][j].original_idxs.size(); t++) {no_ground_indices.indices.push_back(in_pc[i][j].original_idxs[t]);}
             }
 
-            pre_radius = cur_radius;
-            pre_z = cur_z;
             pre_ground = cur_ground;
+            pre_z = cur_z;
+            loc_height_th = local_height_threshold_;
         }
     }
 }
@@ -172,8 +187,8 @@ void PointsGroundFilter::callback(const sensor_msgs::PointCloud2ConstPtr &in)
     ros::Time time_start = ros::Time::now();
 
     //组织点云
-    std::vector<PointCloudXYZRTColor> organized_pc;
-    convert_XYZ_to_XYZRTColor(current_pc_ptr, organized_pc);
+    std::vector<PointCloudInLine> organized_pc;
+    convert_pc(current_pc_ptr, organized_pc);
 
     //判定地面点云和非地面点云
     pcl::PointIndices ground_indices, no_ground_indices;
@@ -236,6 +251,8 @@ void PointsGroundFilter::callback(const sensor_msgs::PointCloud2ConstPtr &in)
 
     if (show_time_)
     {
+        std::cout<<"cost time:"<<time_end - time_start<<"s"<<std::endl;
+        std::cout<<"cost time:"<<time_end - time_start<<"s"<<std::endl;
         std::cout<<"cost time:"<<time_end - time_start<<"s"<<std::endl;
     }
 

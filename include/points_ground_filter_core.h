@@ -24,10 +24,15 @@ private:
     
     bool show_points_size_;
     bool show_time_;
+    
+    float radius_divider_;
+    float radius_min_;
+    float radius_max_;
+    float theta_divider_;
+    float theta_min_;
+    float theta_max_;
 
     float sensor_height_;
-    float radius_divider_;
-    float theta_divider_;
     float local_height_threshold_;
     float general_slope_threshold_;
     
@@ -42,26 +47,21 @@ private:
     ros::Subscriber sub_;
     ros::Publisher pub_ground_, pub_no_ground_;
     
-    struct PointXYZRTColor
+    struct PointCloudInCell
     {
-        pcl::PointXYZ point;
+        float min_z;
+        float max_z;
 
-        float radius; //XY平面极坐标系的半径
-        float theta;  //XY平面极坐标系的极角
-
-        size_t radius_idx; //径向索引
-        size_t theta_idx;  //周向索引
-
-        size_t original_idx; //在原始点云中的索引
+        std::vector<size_t> original_idxs; //在原始点云中的索引
     };
-    typedef std::vector<PointXYZRTColor> PointCloudXYZRTColor;
+    typedef std::vector<PointCloudInCell> PointCloudInLine;
     
     void callback(const sensor_msgs::PointCloud2ConstPtr &in);
     
-    void convert_XYZ_to_XYZRTColor(const pcl::PointCloud<pcl::PointXYZ>::Ptr in_pc_ptr,
-                        std::vector<PointCloudXYZRTColor> &out_pc);
+    void convert_pc(const pcl::PointCloud<pcl::PointXYZ>::Ptr in_pc_ptr,
+                        std::vector<PointCloudInLine> &out_pc);
     
-    void classify_pc(std::vector<PointCloudXYZRTColor> &in_pc,
+    void classify_pc(std::vector<PointCloudInLine> &in_pc,
                         pcl::PointIndices &ground_indices,
                         pcl::PointIndices &no_ground_indices);
     
