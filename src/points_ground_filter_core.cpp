@@ -13,9 +13,9 @@ PointsGroundFilter::PointsGroundFilter(ros::NodeHandle &nh)
     nh.param<float>("sensor_height", sensor_height_, 2.0);
     nh.param<float>("radius_divider", radius_divider_, 0.15);
     nh.param<float>("theta_divider", theta_divider_, 0.4);
-    nh.param<float>("curb_height_threshold", curb_height_threshold_, 0.05);
-    nh.param<float>("obstacle_height_threshold", obstacle_height_threshold_, 0.2);
-    nh.param<float>("general_slope_threshold", general_slope_threshold_, 2);
+    nh.param<float>("local_slope_threshold", local_slope_threshold_, 10);
+    nh.param<float>("general_slope_threshold", general_slope_threshold_, 4);
+    nh.param<float>("curb_height_threshold", curb_height_threshold_, 0.1);
     
     nh.param<bool>("ground_filter_mode", ground_filter_mode_, false);
     nh.param<float>("ground_meank", ground_meank_, 5);
@@ -83,10 +83,10 @@ void PointsGroundFilter::convert_XYZ_to_XYZRTColor(const pcl::PointCloud<pcl::Po
 }
 
 void PointsGroundFilter::classify_pc(std::vector<PointCloudXYZRTColor> &in_pc,
-                                    pcl::PointIndices &ground_indices,
+                                    pcl::PointIndices &freespace_indices,
                                     pcl::PointIndices &obstacle_indices)
 {
-    ground_indices.indices.clear();
+    freespace_indices.indices.clear();
     obstacle_indices.indices.clear();
     
     //遍历每一条射线
@@ -96,72 +96,84 @@ void PointsGroundFilter::classify_pc(std::vector<PointCloudXYZRTColor> &in_pc,
         float pre_radius = 0;
         float pre_z = - sensor_height_;
         bool pre_ground = true;
-        bool pre_obstacle = false;
         
-        //遍历射线上的每一个点
+        //遍历射线上的每一个点，分割地面的点与障碍物的点
         for (size_t j = 0; j < in_pc[i].size(); j++) 
         {
             float cur_radius = in_pc[i][j].radius;
             float cur_z = in_pc[i][j].point.z;
             bool cur_ground;
-            bool cur_obstacle;
 
             //abs(x)对int变量求绝对值
             //fabs(x)对float变量或double变量求绝对值
-
-            //全局高度阈值
-            float gen_height_th = fabs(cur_radius * general_slope_threshold_ * PI / 180);
-
-            //局部高度阈值
-            float curb_height_th;
-            if (j == 0) {curb_height_th = gen_height_th;}
-            else {curb_height_th = curb_height_threshold_;}
-            float obstacle_height_th;
-            if (j == 0) {obstacle_height_th = gen_height_th;}
-            else {obstacle_height_th = obstacle_height_threshold_;}
+            //atan(x)表示x的反正切，其返回值为[-pi/2, +pi/2]之间的一个数
+            //atan2(y, x)表示y / x的反正切，其返回值为[-pi, +pi]之间的一个数
             
-            //若当前点与前一个点高度相近，高度差不超过curb_height_th
-            if (fabs(pre_z - cur_z) <= curb_height_th)
+            //如果当前点与上一个点距离很近，则舍弃当前点，相当于体素栅格滤波
+            if ((cur_z - pre_z) <= 0.05 && (cur_radius - pre_radius) <= 0.05) {continue;}
+            
+            //根据局部坡度判定
+            float slope_l = (float)(atan2(fabs(cur_z - pre_z), (cur_radius - pre_radius)) * 180 / PI);
+            if (slope_l <= local_slope_threshold_)
             {
                 if (pre_ground) {cur_ground = true;}
-                else {cur_ground = false;}
-            }
-            else
-            {
-                cur_ground = false;
-            }
-
-            //若当前点与前一个点高度相近，高度差不超过obstacle_height_th
-            if (fabs(pre_z - cur_z) <= obstacle_height_th)
-            {
-                if (!pre_obstacle) {cur_obstacle = false;}
                 else
                 {
-                    //判断当前点与地面距离
-                    if (fabs(- sensor_height_ - cur_z) <= gen_height_th) {cur_obstacle = false;}
-                    else {cur_obstacle = true;}
+                    //根据全局坡度判定
+                    float slope_g = (float)(atan2(fabs(cur_z - (- sensor_height_)), cur_radius) * 180 / PI);
+                    if (slope_g <= general_slope_threshold_) {cur_ground = true;}
+                    else {cur_ground = false;}
                 }
             }
             else
             {
-                if (!pre_obstacle) {cur_obstacle = true;}
+                if (pre_ground) {cur_ground = false;}
                 else
                 {
-                    //判断当前点与地面距离
-                    if (fabs(- sensor_height_ - cur_z) <= gen_height_th) {cur_obstacle = false;}
-                    else {cur_obstacle = true;}
+                    //根据全局坡度判定
+                    float slope_g = (float)(atan2(fabs(cur_z - (- sensor_height_)), cur_radius) * 180 / PI);
+                    if (slope_g <= general_slope_threshold_) {cur_ground = true;}
+                    else {cur_ground = false;}
                 }
             }
-
-            //提取索引
-            if (cur_ground) {ground_indices.indices.push_back(in_pc[i][j].original_idx);}
-            if (cur_obstacle) {obstacle_indices.indices.push_back(in_pc[i][j].original_idx);}
+            if (!cur_ground) {obstacle_indices.indices.push_back(in_pc[i][j].original_idx);}
 
             pre_radius = cur_radius;
             pre_z = cur_z;
             pre_ground = cur_ground;
-            pre_obstacle = cur_obstacle;
         }
+
+        pre_radius = 0;
+        pre_z = - sensor_height_;
+        bool pre_freespace = true;
+        
+        //遍历射线上的每一个点，提取可行域
+        for (size_t j = 0; j < in_pc[i].size(); j++) 
+        {
+            float cur_radius = in_pc[i][j].radius;
+            float cur_z = in_pc[i][j].point.z;
+            bool cur_freespace;
+
+            if (j == 0)
+            {
+                //根据全局坡度判定
+                float slope_g = (float)(atan2(fabs(cur_z - (- sensor_height_)), cur_radius) * 180 / PI);
+                if (slope_g <= general_slope_threshold_) {cur_freespace = true;}
+                else {cur_freespace = false;}
+            }
+            else
+            {
+                //根据高度差判定
+                if ((cur_z - pre_z) <= curb_height_threshold_ && pre_freespace) {cur_freespace = true;}
+                else {cur_freespace = false;}
+            }
+            if (pre_freespace) {freespace_indices.indices.push_back(in_pc[i][j].original_idx);}
+
+            pre_radius = cur_radius;
+            pre_z = cur_z;
+            pre_freespace = cur_freespace;
+        }
+
     }
 }
 void PointsGroundFilter::publish_pc(const ros::Publisher &pub,

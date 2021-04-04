@@ -33,9 +33,9 @@ private:
     float sensor_height_;
     float radius_divider_;
     float theta_divider_;
-    float curb_height_threshold_;
-    float obstacle_height_threshold_;
+    float local_slope_threshold_;
     float general_slope_threshold_;
+    float curb_height_threshold_;
     
     bool ground_filter_mode_;
     float ground_meank_;
