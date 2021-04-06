@@ -225,47 +225,35 @@ void PointsGroundFilter::publish_marker(const ros::Publisher &pub,
         }
     }
 
-    //数据平滑
-    int n = 5;
-    int iter_num = num / n;
-    for (size_t iter = 0; iter < iter_num; iter++)
+    //数据膨胀
+    size_t num_iter = 2;
+    size_t n = 5;
+    for (size_t iter = 0; iter < num_iter; iter++)
     {
-        std::vector<float> radiuses(n);
-        std::vector<int> assoes(n);
-        for (size_t j = 0; j < n; j++)
+        std::vector<PointR> pc_post;
+        for (size_t p = 0; p < num; p++)
         {
-            radiuses[j] = pc[iter * n + j].radius;
-            assoes[j] = 0;
-        }
-
-        float threshold = 2.0;
-        for (size_t j = 0; j < n; j++)
-        {
+            std::vector<float> radii;
+            radii.resize(2 * n + 1);
+            radii[n] = pc[p].radius;
             for (size_t k = 0; k < n; k++)
             {
-                float dd = (float)sqrt((radiuses[j] - radiuses[k]) * (radiuses[j] - radiuses[k]));
-                if (dd < threshold) {assoes[j] += 1;}
+                radii[n + k + 1] = pc[(p + k + 1) % num].radius;
+                radii[n - k - 1] = pc[(p - k - 1 + num) % num].radius;
             }
-        }
+            
+            double radiusm = DBL_MAX;
+            for (size_t k = 0; k < 2 * n + 1; k++) {if (radii[k] < radiusm) {radiusm = radii[k];}}
 
-        float radius = 0;
-        int asso = 0;
-        for (size_t j = 0; j < n; j++)
-        {
-            if (assoes[j] >= asso)
-            {
-                radius = radiuses[j];
-                asso = assoes[j];
-            }
+            PointR new_point;
+            new_point.radius = radiusm;
+            new_point.point.x = radiusm * cos(p * theta_divider_ * PI / 180);
+            new_point.point.y = radiusm * sin(p * theta_divider_ * PI / 180);
+            new_point.point.z = - sensor_height_;
+            pc_post.push_back(new_point);
+            
         }
-        
-        for (size_t j = 0; j < n; j++)
-        {
-            float x = radius * cos((iter * n + j) * theta_divider_ * PI / 180);
-            float y = radius * sin((iter * n + j) * theta_divider_ * PI / 180);
-            pc[iter * n + j].point.x = x;
-            pc[iter * n + j].point.y = y;
-        }
+        pc = pc_post;
     }
     
     geometry_msgs::Point origin;

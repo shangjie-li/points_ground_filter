@@ -1,6 +1,8 @@
 #pragma once
 
 #include <ros/ros.h>
+#include <limits.h>
+#include <float.h>
 #include <visualization_msgs/Marker.h>
 #include <visualization_msgs/MarkerArray.h>
 #include <geometry_msgs/Point.h>
