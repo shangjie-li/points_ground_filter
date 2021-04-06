@@ -112,29 +112,29 @@ void PointsGroundFilter::classify_pc(std::vector<PointCloudXYZRTColor> &in_pc,
             //如果当前点与上一个点距离很近，则舍弃当前点，相当于体素栅格滤波
             if ((cur_z - pre_z) <= 0.05 && (cur_radius - pre_radius) <= 0.05) {continue;}
             
-            //根据局部坡度判定
-            float slope_l = (float)(atan2(fabs(cur_z - pre_z), (cur_radius - pre_radius)) * 180 / PI);
-            if (slope_l <= local_slope_threshold_)
+            if (j == 0)
             {
-                if (pre_ground) {cur_ground = true;}
-                else
-                {
-                    //根据全局坡度判定
-                    float slope_g = (float)(atan2(fabs(cur_z - (- sensor_height_)), cur_radius) * 180 / PI);
-                    if (slope_g <= general_slope_threshold_) {cur_ground = true;}
-                    else {cur_ground = false;}
-                }
+                //根据全局坡度判定
+                float slope_g = (float)(atan2(fabs(cur_z - (- sensor_height_)), cur_radius) * 180 / PI);
+                if (slope_g <= general_slope_threshold_) {cur_ground = true;}
+                else {cur_ground = false;}
             }
             else
             {
-                if (pre_ground) {cur_ground = false;}
-                else
+                //根据局部坡度判定
+                float slope_l = (float)(atan2(fabs(cur_z - pre_z), (cur_radius - pre_radius)) * 180 / PI);
+                if (slope_l <= local_slope_threshold_)
                 {
-                    //根据全局坡度判定
-                    float slope_g = (float)(atan2(fabs(cur_z - (- sensor_height_)), cur_radius) * 180 / PI);
-                    if (slope_g <= general_slope_threshold_) {cur_ground = true;}
-                    else {cur_ground = false;}
+                    if (pre_ground) {cur_ground = true;}
+                    else
+                    {
+                        //根据全局坡度判定
+                        float slope_g = (float)(atan2(fabs(cur_z - (- sensor_height_)), cur_radius) * 180 / PI);
+                        if (slope_g <= general_slope_threshold_) {cur_ground = true;}
+                        else {cur_ground = false;}
+                    }
                 }
+                else {cur_ground = false;}
             }
             if (!cur_ground) {obstacle_indices.indices.push_back(in_pc[i][j].original_idx);}
 
