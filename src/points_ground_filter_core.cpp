@@ -225,14 +225,13 @@ void PointsGroundFilter::publish_marker(const ros::Publisher &pub,
         }
     }
 
-    //数据膨胀
-    size_t num_iter = 2;
-    size_t n = 5;
-    for (size_t iter = 0; iter < num_iter; iter++)
+    //数据腐蚀
+    for (size_t iter = 0; iter < 1; iter++)
     {
         std::vector<PointR> pc_post;
         for (size_t p = 0; p < num; p++)
         {
+            size_t n = 2;
             std::vector<float> radii;
             radii.resize(2 * n + 1);
             radii[n] = pc[p].radius;
@@ -242,7 +241,7 @@ void PointsGroundFilter::publish_marker(const ros::Publisher &pub,
                 radii[n - k - 1] = pc[(p - k - 1 + num) % num].radius;
             }
             
-            double radiusm = DBL_MAX;
+            float radiusm = (float)DBL_MAX;
             for (size_t k = 0; k < 2 * n + 1; k++) {if (radii[k] < radiusm) {radiusm = radii[k];}}
 
             PointR new_point;
@@ -251,7 +250,69 @@ void PointsGroundFilter::publish_marker(const ros::Publisher &pub,
             new_point.point.y = radiusm * sin(p * theta_divider_ * PI / 180);
             new_point.point.z = - sensor_height_;
             pc_post.push_back(new_point);
+        }
+        pc = pc_post;
+    }
+
+    //利用最小可通行宽度筛选
+    for (size_t iter = 0; iter < 4; iter++)
+    {
+        std::vector<PointR> pc_post;
+        for (size_t p = 0; p < num; p++)
+        {
+            float passable_width = 1.5;
+            float tolerance = 10.0 / (1 + iter);
+            bool overflow = false;
+            bool flag = false;
             
+            //设置搜索范围，单位度
+            float search_range = 10;
+
+            //正向搜索
+            float radius_f;
+            size_t sum_f;
+            for (size_t k = 1; k < floor(search_range / theta_divider_); k++)
+            {
+                if (pc[(p + k) % num].radius < pc[p].radius - tolerance)
+                {
+                    radius_f = pc[(p + k) % num].radius;
+                    sum_f = k;
+                    break;
+                }
+                if (k == floor(search_range / theta_divider_) - 1) {overflow = true;}
+            }
+            //反向搜索
+            float radius_b;
+            size_t sum_b;
+            for (size_t k = 1; k < floor(search_range / theta_divider_); k++)
+            {
+                if (pc[(p - k + num) % num].radius < pc[p].radius - tolerance)
+                {
+                    radius_b = pc[(p - k + num) % num].radius;
+                    sum_b = k;
+                    break;
+                }
+                if (k == floor(search_range / theta_divider_) - 1) {overflow = true;}
+            }
+
+            //判定是否能够通行
+            if (overflow) {flag = true;}
+            else
+            {
+                float r = (radius_f > radius_b) ? radius_f : radius_b;
+                float a = (sum_f + sum_b) * theta_divider_ * PI / 180;
+                if (r * a > passable_width) {flag = true;}
+            }
+
+            float radius;
+            if (flag) {radius = pc[p].radius;} else {radius = (radius_f > radius_b) ? radius_f : radius_b;}
+            
+            PointR new_point;
+            new_point.radius = radius;
+            new_point.point.x = radius * cos(p * theta_divider_ * PI / 180);
+            new_point.point.y = radius * sin(p * theta_divider_ * PI / 180);
+            new_point.point.z = - sensor_height_;
+            pc_post.push_back(new_point);
         }
         pc = pc_post;
     }
