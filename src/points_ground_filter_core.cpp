@@ -110,7 +110,7 @@ void PointsGroundFilter::classify_pc(std::vector<PointCloudXYZRTColor> &in_pc,
             //atan2(y, x)表示y / x的反正切，其返回值为[-pi, +pi]之间的一个数
             
             //如果当前点与上一个点距离很近，则舍弃当前点，相当于体素栅格滤波
-            if ((cur_z - pre_z) <= 0.05 && (cur_radius - pre_radius) <= 0.05) {continue;}
+            if (fabs(cur_z - pre_z) <= 0.15 && fabs(cur_radius - pre_radius) <= 0.15) {continue;}
             
             if (j == 0)
             {
@@ -154,6 +154,9 @@ void PointsGroundFilter::classify_pc(std::vector<PointCloudXYZRTColor> &in_pc,
             float cur_z = in_pc[i][j].point.z;
             bool cur_freespace;
 
+            //如果当前点与上一个点距离很近，则舍弃当前点，相当于体素栅格滤波
+            if (fabs(cur_z - pre_z) <= 0.15 && fabs(cur_radius - pre_radius) <= 0.15) {continue;}
+            
             if (j == 0)
             {
                 //根据全局坡度判定
