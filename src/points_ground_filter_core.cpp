@@ -1,447 +1,304 @@
 #include "points_ground_filter_core.h"
 
-PointsGroundFilter::PointsGroundFilter(ros::NodeHandle &nh)
+PointsGroundFilter::PointsGroundFilter(ros::NodeHandle& nh)
 {
-    nh.param<std::string>("sub_topic", sub_topic_, "/rslidar_points");
-    nh.param<std::string>("pub_ground_topic", pub_ground_topic_, "/rslidar_points_ground");
-    nh.param<std::string>("pub_no_ground_topic", pub_no_ground_topic_, "/rslidar_points_no_ground");
-    nh.param<std::string>("pub_marker_topic", pub_marker_topic_, "/feasible_region");
-    
-    nh.param<bool>("show_points_size", show_points_size_, false);
-    nh.param<bool>("show_time", show_time_, false);
+    nh.param<std::string>("sub_topic", sub_topic_, "/pandar_points_processed");
+    nh.param<std::string>("pub_ground_topic", pub_ground_topic_, "/pandar_points_ground");
+    nh.param<std::string>("pub_no_ground_topic", pub_no_ground_topic_, "/pandar_points_no_ground");
 
+    nh.param<bool>("show_points_size", show_points_size_, "false");
+    nh.param<bool>("show_time", show_time_, "false");
+    
+    nh.param<bool>("crop_range_mode", crop_range_mode_, "false");
+    nh.param<float>("range_front", range_front_, 50);
+    nh.param<float>("range_rear", range_rear_, 50);
+    nh.param<float>("range_left", range_left_, 15);
+    nh.param<float>("range_right", range_right_, 15);
+    
     nh.param<float>("sensor_height", sensor_height_, 2.0);
-    nh.param<float>("radius_divider", radius_divider_, 0.15);
-    nh.param<float>("theta_divider", theta_divider_, 0.4);
-    nh.param<float>("local_slope_threshold", local_slope_threshold_, 10);
-    nh.param<float>("general_slope_threshold", general_slope_threshold_, 4);
-    nh.param<float>("curb_height_threshold", curb_height_threshold_, 0.1);
+    nh.param<float>("seeds_distance_threshold", seeds_distance_threshold_, 1.0);
+    nh.param<float>("ground_distance_threshold", ground_distance_threshold_, 0.2);
+    nh.param<int>("num_lpr", num_lpr_, 100);
     
-    nh.param<bool>("ground_filter_mode", ground_filter_mode_, false);
-    nh.param<float>("ground_meank", ground_meank_, 5);
-    nh.param<float>("ground_stdmul", ground_stdmul_, 1);
-    
-    nh.param<bool>("no_ground_filter_mode", no_ground_filter_mode_, false);
-    nh.param<float>("no_ground_meank", no_ground_meank_, 5);
-    nh.param<float>("no_ground_stdmul", no_ground_stdmul_, 1);
-    
-    sub_ = nh.subscribe(sub_topic_, 1, &PointsGroundFilter::callback, this);
+    nh.param<int>("seg_num_front", seg_num_front_, 3);
+    nh.param<int>("seg_num_rear", seg_num_rear_, 3);
+    ros::param::get("~seg_distance_front", seg_distance_front_);
+    ros::param::get("~seg_distance_rear", seg_distance_rear_);
+
+    sub_point_cloud_ = nh.subscribe(sub_topic_, 1, &PointsGroundFilter::callback, this);
     pub_ground_ = nh.advertise<sensor_msgs::PointCloud2>(pub_ground_topic_, 1);
     pub_no_ground_ = nh.advertise<sensor_msgs::PointCloud2>(pub_no_ground_topic_, 1);
-    pub_marker_ = nh.advertise<visualization_msgs::Marker>(pub_marker_topic_, 1);
-    
+
     ros::spin();
 }
 
-PointsGroundFilter::~PointsGroundFilter(){}
-
-void PointsGroundFilter::Spin(){}
-
-void PointsGroundFilter::convert_XYZ_to_XYZRTColor(const pcl::PointCloud<pcl::PointXYZ>::Ptr in_pc_ptr,
-                                    std::vector<PointCloudXYZRTColor> &out_pc)
+PointsGroundFilter::~PointsGroundFilter()
 {
-    //floor(x)返回小于或等于x的最大整数
-    //ceil(x)返回大于x的最小整数
-    size_t num = ceil(360 / theta_divider_);
-
-    //out_pc中包含num条射线，每条射线都是PointXYZRTColor型点云
-    out_pc.resize(num);
-
-    //以射线的形式组织点云
-    #pragma omp for
-    for (size_t i = 0; i < in_pc_ptr->points.size(); i++)
-    {
-        PointXYZRTColor new_point;
-        auto radius = (float)sqrt(in_pc_ptr->points[i].x * in_pc_ptr->points[i].x + in_pc_ptr->points[i].y * in_pc_ptr->points[i].y);
-        auto theta = (float)atan2(in_pc_ptr->points[i].y, in_pc_ptr->points[i].x) * 180 / PI;
-        if (theta < 0)
-        {
-            theta += 360;
-        }
-
-        //径向微分
-        auto radius_idx = (size_t)floor(radius / radius_divider_);
-        //周向微分
-        auto theta_idx = (size_t)floor(theta / theta_divider_);
-
-        new_point.point = in_pc_ptr->points[i];
-        new_point.radius = radius;
-        new_point.theta = theta;
-        new_point.radius_idx = radius_idx;
-        new_point.theta_idx = theta_idx;
-        new_point.original_idx = i;
-
-        out_pc[theta_idx].push_back(new_point);
-    }
-
-    //将同一条射线上的点按照半径排序
-    #pragma omp for
-    for (size_t i = 0; i < num; i++)
-    {
-        std::sort(out_pc[i].begin(), out_pc[i].end(), [](const PointXYZRTColor &a, const PointXYZRTColor &b) {return a.radius < b.radius;});
-    }
 }
 
-void PointsGroundFilter::classify_pc(std::vector<PointCloudXYZRTColor> &in_pc,
-                                    pcl::PointIndices &freespace_indices,
-                                    pcl::PointIndices &obstacle_indices)
+bool compareZ(pgf::PointXYZIR a, pgf::PointXYZIR b)
 {
-    freespace_indices.indices.clear();
-    obstacle_indices.indices.clear();
+    return a.z < b.z;
+}
+
+/*
+    @brief Estimate the plane model.
+    The ground plane model is: ax + by + cz + d = 0.
+    Here the normal vector of the plane is: [a, b, c].
+    The main step is performed SVD(UAV) on covariance matrix.
+    Taking the sigular vector in U matrix according to the smallest
+    sigular value in A, as the `normal`. `d` is then calculated
+    according to mean ground points.
+    @param pc: point clouds to estimate plane
+    @param normal: normal vector of the plane
+    @param d: plane parameter
+*/
+void PointsGroundFilter::estimatePlane(const pcl::PointCloud<pgf::PointXYZIR>::Ptr pc,
+                                       Eigen::MatrixXf& normal,
+                                       float& d)
+{
+    // Create covarian matrix in single pass.
+    // TODO: compare the efficiency.
+    Eigen::Matrix3f cov;
+    Eigen::Vector4f pc_mean;
+    pcl::computeMeanAndCovarianceMatrix(*pc, cov, pc_mean);
     
-    //遍历每一条射线
-    #pragma omp for
-    for (size_t i = 0; i < in_pc.size(); i++)
-    {
-        float pre_radius = 0;
-        float pre_z = - sensor_height_;
-        bool pre_ground = true;
-        
-        //遍历射线上的每一个点，分割地面的点与障碍物的点
-        for (size_t j = 0; j < in_pc[i].size(); j++) 
-        {
-            float cur_radius = in_pc[i][j].radius;
-            float cur_z = in_pc[i][j].point.z;
-            bool cur_ground;
-
-            //abs(x)对int变量求绝对值
-            //fabs(x)对float变量或double变量求绝对值
-            //atan(x)表示x的反正切，其返回值为[-pi/2, +pi/2]之间的一个数
-            //atan2(y, x)表示y / x的反正切，其返回值为[-pi, +pi]之间的一个数
-            
-            //如果当前点与上一个点距离很近，则舍弃当前点，相当于体素栅格滤波
-            if (fabs(cur_z - pre_z) <= 0.15 && fabs(cur_radius - pre_radius) <= 0.15) {continue;}
-            
-            if (j == 0)
-            {
-                //根据全局坡度判定
-                float slope_g = (float)(atan2(fabs(cur_z - (- sensor_height_)), cur_radius) * 180 / PI);
-                if (slope_g <= general_slope_threshold_) {cur_ground = true;}
-                else {cur_ground = false;}
-            }
-            else
-            {
-                //根据局部坡度判定
-                float slope_l = (float)(atan2(fabs(cur_z - pre_z), (cur_radius - pre_radius)) * 180 / PI);
-                if (slope_l <= local_slope_threshold_)
-                {
-                    if (pre_ground) {cur_ground = true;}
-                    else
-                    {
-                        //根据全局坡度判定
-                        float slope_g = (float)(atan2(fabs(cur_z - (- sensor_height_)), cur_radius) * 180 / PI);
-                        if (slope_g <= general_slope_threshold_) {cur_ground = true;}
-                        else {cur_ground = false;}
-                    }
-                }
-                else {cur_ground = false;}
-            }
-            if (!cur_ground) {obstacle_indices.indices.push_back(in_pc[i][j].original_idx);}
-
-            pre_radius = cur_radius;
-            pre_z = cur_z;
-            pre_ground = cur_ground;
-        }
-
-        pre_radius = 0;
-        pre_z = - sensor_height_;
-        bool pre_freespace = true;
-        
-        //遍历射线上的每一个点，提取可行域
-        for (size_t j = 0; j < in_pc[i].size(); j++) 
-        {
-            float cur_radius = in_pc[i][j].radius;
-            float cur_z = in_pc[i][j].point.z;
-            bool cur_freespace;
-
-            //如果当前点与上一个点距离很近，则舍弃当前点，相当于体素栅格滤波
-            if (fabs(cur_z - pre_z) <= 0.15 && fabs(cur_radius - pre_radius) <= 0.15) {continue;}
-            
-            if (j == 0)
-            {
-                //根据全局坡度判定
-                float slope_g = (float)(atan2(fabs(cur_z - (- sensor_height_)), cur_radius) * 180 / PI);
-                if (slope_g <= general_slope_threshold_) {cur_freespace = true;}
-                else {cur_freespace = false;}
-            }
-            else
-            {
-                //根据高度差判定
-                if ((cur_z - pre_z) <= curb_height_threshold_ && pre_freespace) {cur_freespace = true;}
-                else {cur_freespace = false;}
-            }
-            if (pre_freespace) {freespace_indices.indices.push_back(in_pc[i][j].original_idx);}
-
-            pre_radius = cur_radius;
-            pre_z = cur_z;
-            pre_freespace = cur_freespace;
-        }
-
-    }
-}
-void PointsGroundFilter::publish_pc(const ros::Publisher &pub,
-                                    const pcl::PointCloud<pcl::PointXYZ>::Ptr pc_ptr,
-                                    const std_msgs::Header &header)
-{
-    sensor_msgs::PointCloud2 pc_msg;
-    pcl::toROSMsg(*pc_ptr, pc_msg);
-    pc_msg.header = header;
-    pub.publish(pc_msg);
+    // Singular Value Decomposition: SVD
+    Eigen::JacobiSVD<Eigen::MatrixXf> svd(cov, Eigen::DecompositionOptions::ComputeFullU);
+    
+    // Use the least singular vector as normal.
+    normal = (svd.matrixU().col(2));
+    
+    // Compute d_ by mean ground seeds value.
+    Eigen::Vector3f seeds_mean = pc_mean.head<3>();
+    d = -(normal.transpose() * seeds_mean)(0, 0);
 }
 
-void PointsGroundFilter::publish_marker(const ros::Publisher &pub,
-                                        const pcl::PointCloud<pcl::PointXYZ>::Ptr in_pc_ptr,
-                                        visualization_msgs::Marker &region,
-                                        std_msgs::Header header)
+/*
+    @brief Extract initial seeds of the given point clouds sorted segment.
+    This function filter ground seeds points accoring to heigt.
+    LPR means low point representative.
+    @param pc_sorted: sorted point clouds
+    @param pc_seeds: points of seeds
+*/
+void PointsGroundFilter::extractInitialSeeds(const pcl::PointCloud<pgf::PointXYZIR>::Ptr pc_sorted,
+                                             pcl::PointCloud<pgf::PointXYZIR>::Ptr pc_seeds)
 {
-    std::vector<PointR> pc;
-    size_t num = ceil(360 / theta_divider_);
-
-    //初始化PointXYZRTColor型数组，元素的索引由极角决定
-    #pragma omp for
-    for (size_t p = 0; p < num; p++)
+    // Calculate the mean height value.
+    float sum = 0;
+    int cnt_lpr = 0;
+    for(int i = 0; i < pc_sorted->points.size() && cnt_lpr < num_lpr_; i++)
     {
-        PointR new_point;
-        new_point.radius = 0;
-        new_point.point.x = 0;
-        new_point.point.y = 0;
-        new_point.point.z = - sensor_height_;
-        pc.push_back(new_point);
+        sum += pc_sorted->points[i].z;
+        cnt_lpr++;
     }
-
-    //将最远点作为数组中每个极角对应的元素
-    #pragma omp for
-    for (size_t i = 0; i < in_pc_ptr->points.size(); i++)
+    float lpr_height = cnt_lpr != 0 ? sum / cnt_lpr : 0; // in case divide by 0
+    
+    int it = 0;
+    for(int i = 0; i < pc_sorted->points.size(); i++)
     {
-        auto radius = (float)sqrt(in_pc_ptr->points[i].x * in_pc_ptr->points[i].x + in_pc_ptr->points[i].y * in_pc_ptr->points[i].y);
-        auto theta = (float)atan2(in_pc_ptr->points[i].y, in_pc_ptr->points[i].x) * 180 / PI;
-        if (theta < 0) {theta += 360;}
+        if(pc_sorted->points[i].z < lpr_height + seeds_distance_threshold_) it++;
+        else break;
+    }
+    int interval = floor(it / num_lpr_);
+    
+    // Filter point clouds those height is less than lpr.height + seeds_distance_threshold_.
+    int cnt_seeds = 0;
+    pc_seeds->clear();
+    for(int i = 0; i < pc_sorted->points.size() && cnt_seeds < num_lpr_; i += interval)
+    {
+        pc_seeds->points.push_back(pc_sorted->points[i]);
+        cnt_seeds++;
+    }
+}
 
-        auto theta_idx = (size_t)floor(theta / theta_divider_);
+void PointsGroundFilter::classifyPointCloudInSegment(pcl::PointCloud<pgf::PointXYZIR>::Ptr pc,
+                                                     pcl::PointCloud<pgf::PointXYZIR>::Ptr pc_ground,
+                                                     pcl::PointCloud<pgf::PointXYZIR>::Ptr pc_no_ground)
+{
+    // 1.Sort point clouds on Z-axis value.
+    sort(pc->points.begin(), pc->end(), compareZ);
+    
+    // 2.Removal error point.
+    // As there are some error mirror reflection under the ground, here regardless point under -1.5 * sensor_height_.
+    // Sort point according to height, here uses z-axis in default.
+    pcl::PointCloud<pgf::PointXYZIR>::iterator it = pc->points.begin();
+    for(int i = 0; i < pc->points.size(); i++)
+    {
+        if(pc->points[i].z < -1.5 * sensor_height_) it++;
+        else break;
+    }
+    pc->points.erase(pc->points.begin(), it);
+    
+    // 3.Extract initial ground seeds.
+    pcl::PointCloud<pgf::PointXYZIR>::Ptr pc_seeds(new pcl::PointCloud<pgf::PointXYZIR>);
+    extractInitialSeeds(pc, pc_seeds);
+    
+    // 4.Estimate ground plane model.
+    Eigen::MatrixXf normal;
+    float d;
+    estimatePlane(pc_seeds, normal, d);
+    
+    // 5.Filter point clouds by distance threshold, considering sqrt(a * a + b * b + c * c) = 1.
+    // Now the pc->points.size() is less than the size of original point clouds.
+    float a = normal(0);
+    float b = normal(1);
+    float c = normal(2);
 
-        if (radius > pc[theta_idx].radius)
+    for(int r = 0; r < pc->points.size(); r++)
+    {
+        if(a * pc->points[r].x + b * pc->points[r].y + c * pc->points[r].z + d < ground_distance_threshold_)
         {
-            pc[theta_idx].radius = radius;
-            pc[theta_idx].point.x = in_pc_ptr->points[i].x;
-            pc[theta_idx].point.y = in_pc_ptr->points[i].y;
-            pc[theta_idx].point.z = - sensor_height_;
+            pc_ground->points.push_back(pc->points[r]);
+        }
+        else
+        {
+            pc_no_ground->points.push_back(pc->points[r]);
         }
     }
+}
 
-    //数据腐蚀
-    for (size_t iter = 0; iter < 1; iter++)
+void PointsGroundFilter::classifyPointCloud(pcl::PointCloud<pgf::PointXYZIR>::Ptr pc,
+                                            pcl::PointCloud<pgf::PointXYZIR>::Ptr pc_ground,
+                                            pcl::PointCloud<pgf::PointXYZIR>::Ptr pc_no_ground)
+{
+    
+    // Create front segments in point clouds.
+    std::vector<pcl::PointCloud<pgf::PointXYZIR>::Ptr> pc_array_front(seg_num_front_);
+    for(int j = 0; j < pc_array_front.size(); j++)
     {
-        std::vector<PointR> pc_post;
-        for (size_t p = 0; p < num; p++)
-        {
-            size_t n = 2;
-            std::vector<float> radii;
-            radii.resize(2 * n + 1);
-            radii[n] = pc[p].radius;
-            for (size_t k = 0; k < n; k++)
-            {
-                radii[n + k + 1] = pc[(p + k + 1) % num].radius;
-                radii[n - k - 1] = pc[(p - k - 1 + num) % num].radius;
-            }
-            
-            float radiusm = (float)DBL_MAX;
-            for (size_t k = 0; k < 2 * n + 1; k++) {if (radii[k] < radiusm) {radiusm = radii[k];}}
-
-            PointR new_point;
-            new_point.radius = radiusm;
-            new_point.point.x = radiusm * cos(p * theta_divider_ * PI / 180);
-            new_point.point.y = radiusm * sin(p * theta_divider_ * PI / 180);
-            new_point.point.z = - sensor_height_;
-            pc_post.push_back(new_point);
-        }
-        pc = pc_post;
+        pcl::PointCloud<pgf::PointXYZIR>::Ptr tmp(new pcl::PointCloud<pgf::PointXYZIR>);
+        pc_array_front[j] = tmp;
     }
-
-    //利用最小可通行宽度筛选
-    for (size_t iter = 0; iter < 4; iter++)
+    
+    // Create rear segments in point clouds.
+    std::vector<pcl::PointCloud<pgf::PointXYZIR>::Ptr> pc_array_rear(seg_num_rear_);
+    for(int j = 0; j < pc_array_rear.size(); j++)
     {
-        std::vector<PointR> pc_post;
-        for (size_t p = 0; p < num; p++)
+        pcl::PointCloud<pgf::PointXYZIR>::Ptr tmp(new pcl::PointCloud<pgf::PointXYZIR>);
+        pc_array_rear[j] = tmp;
+    }
+    
+    // Divide point clouds into segments.
+    for(int i = 0; i < pc->points.size(); i++)
+    {
+        if(pc->points[i].x >= 0)
         {
-            float passable_width = 1.5;
-            float tolerance = 10.0 / (1 + iter);
-            bool overflow = false;
-            bool flag = false;
-            
-            //设置搜索范围，单位度
-            float search_range = 10;
-
-            //正向搜索
-            float radius_f;
-            size_t sum_f;
-            for (size_t k = 1; k < floor(search_range / theta_divider_); k++)
+            for(int j = 0; j < pc_array_front.size(); j++)
             {
-                if (pc[(p + k) % num].radius < pc[p].radius - tolerance)
+                if(fabs(pc->points[i].x) < seg_distance_front_[j])
                 {
-                    radius_f = pc[(p + k) % num].radius;
-                    sum_f = k;
+                    pc_array_front[j]->points.push_back(pc->points[i]);
                     break;
                 }
-                if (k == floor(search_range / theta_divider_) - 1) {overflow = true;}
             }
-            //反向搜索
-            float radius_b;
-            size_t sum_b;
-            for (size_t k = 1; k < floor(search_range / theta_divider_); k++)
+        }
+        else
+        {
+            for(int j = 0; j < pc_array_rear.size(); j++)
             {
-                if (pc[(p - k + num) % num].radius < pc[p].radius - tolerance)
+                if(fabs(pc->points[i].x) < seg_distance_rear_[j])
                 {
-                    radius_b = pc[(p - k + num) % num].radius;
-                    sum_b = k;
+                    pc_array_rear[j]->points.push_back(pc->points[i]);
                     break;
                 }
-                if (k == floor(search_range / theta_divider_) - 1) {overflow = true;}
             }
-
-            //判定是否能够通行
-            if (overflow) {flag = true;}
-            else
-            {
-                float r = (radius_f > radius_b) ? radius_f : radius_b;
-                float a = (sum_f + sum_b) * theta_divider_ * PI / 180;
-                if (r * a > passable_width) {flag = true;}
-            }
-
-            float radius;
-            if (flag) {radius = pc[p].radius;} else {radius = (radius_f > radius_b) ? radius_f : radius_b;}
-            
-            PointR new_point;
-            new_point.radius = radius;
-            new_point.point.x = radius * cos(p * theta_divider_ * PI / 180);
-            new_point.point.y = radius * sin(p * theta_divider_ * PI / 180);
-            new_point.point.z = - sensor_height_;
-            pc_post.push_back(new_point);
         }
-        pc = pc_post;
     }
     
-    geometry_msgs::Point origin;
-    origin.x = 0;
-    origin.y = 0;
-    origin.z = - sensor_height_;
-
-    //用连续三角形表示可行域，计算三角形的顶点
-    for (size_t p = 0; p < num; p++)
+    // Classify the ground points and no ground points in front segments.
+    for(int j = 0; j < pc_array_front.size(); j++)
     {
-        region.points.push_back(origin);
-        region.points.push_back(pc[p].point);
-        region.points.push_back(pc[(p + 1) % num].point);
+        classifyPointCloudInSegment(pc_array_front[j], pc_ground, pc_no_ground);
     }
-
-    region.header = header;
-
-    //设置该标记的命名空间和ID，ID应该是独一无二的
-    //具有相同命名空间和ID的标记将会覆盖前一个
-    region.ns = "feasible_region";
-    region.id = 0;
     
-    //设置标记类型
-    region.type = visualization_msgs::Marker::TRIANGLE_LIST;
-    
-    //设置标记行为：ADD为添加，DELETE为删除
-    region.action = visualization_msgs::Marker::ADD;
-
-    //设置标记尺寸
-    region.scale.x = 1;
-    region.scale.y = 1;
-    region.scale.z = 1;
-
-    //设置标记颜色，确保不透明度alpha不为0
-    region.color.r = 0.0f;
-    region.color.g = 0.8f;
-    region.color.b = 0.0f;
-    region.color.a = 0.65;
-
-    region.lifetime = ros::Duration(0.1);
-    region.text = ' ';
-
-    pub_marker_.publish(region);
+    // Classify the ground points and no ground points in rear segments.
+    for(int j = 0; j < pc_array_rear.size(); j++)
+    {
+        classifyPointCloudInSegment(pc_array_rear[j], pc_ground, pc_no_ground);
+    }
 }
 
-void PointsGroundFilter::callback(const sensor_msgs::PointCloud2ConstPtr &in)
+void PointsGroundFilter::cropPointCloud(const pcl::PointCloud<pgf::PointXYZIR>::Ptr pc,
+                                        pcl::PointCloud<pgf::PointXYZIR>::Ptr pc_cropped)
 {
-    pcl::PointCloud<pcl::PointXYZ>::Ptr current_pc_ptr(new pcl::PointCloud<pcl::PointXYZ>);
-    pcl::fromROSMsg(*in, *current_pc_ptr);
+    for(int i = 0; i < pc->points.size(); i++)
+    {
+        if(pc->points[i].x < range_front_ && pc->points[i].x > -range_rear_ && pc->points[i].y < range_left_ && pc->points[i].y > -range_right_)
+        {
+            pc_cropped->points.push_back(pc->points[i]);
+        }
+    }
+}
 
+void PointsGroundFilter::callback(const sensor_msgs::PointCloud2ConstPtr pc_msg)
+{
     ros::Time time_start = ros::Time::now();
-
-    //组织点云
-    std::vector<PointCloudXYZRTColor> organized_pc;
-    convert_XYZ_to_XYZRTColor(current_pc_ptr, organized_pc);
-
-    //判定地面点云和非地面点云
-    pcl::PointIndices ground_indices, no_ground_indices;
-    classify_pc(organized_pc, ground_indices, no_ground_indices);
-
-    pcl::PointCloud<pcl::PointXYZ>::Ptr ground_pc_ptr(new pcl::PointCloud<pcl::PointXYZ>);
-    pcl::PointCloud<pcl::PointXYZ>::Ptr no_ground_pc_ptr(new pcl::PointCloud<pcl::PointXYZ>);
-    pcl::PointCloud<pcl::PointXYZ>::Ptr filtered_ground_pc_ptr(new pcl::PointCloud<pcl::PointXYZ>);
-    pcl::PointCloud<pcl::PointXYZ>::Ptr filtered_no_ground_pc_ptr(new pcl::PointCloud<pcl::PointXYZ>);
-
-    pcl::ExtractIndices<pcl::PointXYZ> extractor_ground;
-    extractor_ground.setInputCloud(current_pc_ptr);
-    extractor_ground.setIndices(boost::make_shared<pcl::PointIndices>(ground_indices));
-    extractor_ground.setNegative(false); //true removes the indices, false leaves only the indices
-    extractor_ground.filter(*ground_pc_ptr);
-
-    pcl::ExtractIndices<pcl::PointXYZ> extractor_no_ground;
-    extractor_no_ground.setInputCloud(current_pc_ptr);
-    extractor_no_ground.setIndices(boost::make_shared<pcl::PointIndices>(no_ground_indices));
-    extractor_no_ground.setNegative(false); //true removes the indices, false leaves only the indices
-    extractor_no_ground.filter(*no_ground_pc_ptr);
     
-    //针对ground_pc_ptr滤波
-    if (ground_filter_mode_)
+    // Convert ROS msg to pcl form.
+    pcl::PointCloud<pgf::PointXYZIR>::Ptr pc(new pcl::PointCloud<pgf::PointXYZIR>);
+    pcl::fromROSMsg(*pc_msg, *pc);
+    
+    /*
+    // Copy the original point clouds.
+    pcl::PointCloud<pgf::PointXYZIR>::Ptr pc_all(new pcl::PointCloud<pgf::PointXYZIR>);
+    pgf::PointXYZIRL point;
+    for(size_t i = 0; i < pc->points.size(); i++)
     {
-        pcl::StatisticalOutlierRemoval<pcl::PointXYZ> statFilter_ground;
-        statFilter_ground.setInputCloud(ground_pc_ptr);
-        statFilter_ground.setMeanK(ground_meank_);
-        statFilter_ground.setStddevMulThresh(ground_stdmul_);
-        statFilter_ground.filter(*filtered_ground_pc_ptr);
+        point.x = pc->points[i].x;
+        point.y = pc->points[i].y;
+        point.z = pc->points[i].z;
+        point.label = 0u;
+        point.intensity = pc->points[i].intensity;
+        point.ring = pc->points[i].ring;
+        pc_all->points.push_back(point);
     }
-    else {filtered_ground_pc_ptr = ground_pc_ptr;}
+    */
     
-    //针对no_ground_pc_ptr滤波
-    if (no_ground_filter_mode_)
+    pcl::PointCloud<pgf::PointXYZIR>::Ptr pc_cropped(new pcl::PointCloud<pgf::PointXYZIR>);
+    if(crop_range_mode_)
     {
-        pcl::StatisticalOutlierRemoval<pcl::PointXYZ> statFilter_no_ground;
-        statFilter_no_ground.setInputCloud(no_ground_pc_ptr);
-        statFilter_no_ground.setMeanK(no_ground_meank_);
-        statFilter_no_ground.setStddevMulThresh(no_ground_stdmul_);
-        statFilter_no_ground.filter(*filtered_no_ground_pc_ptr);
+        cropPointCloud(pc, pc_cropped);
     }
-    else {filtered_no_ground_pc_ptr = no_ground_pc_ptr;}
+    else
+    {
+        pc_cropped = pc;
+    }
     
-    int size_ground = filtered_ground_pc_ptr->points.size();
-    int size_no_ground = filtered_no_ground_pc_ptr->points.size();
+    // Classify the point clouds.
+    pcl::PointCloud<pgf::PointXYZIR>::Ptr pc_ground(new pcl::PointCloud<pgf::PointXYZIR>);
+    pcl::PointCloud<pgf::PointXYZIR>::Ptr pc_no_ground(new pcl::PointCloud<pgf::PointXYZIR>);
+    classifyPointCloud(pc_cropped, pc_ground, pc_no_ground);
+    
+    // Publish ground points.
+    sensor_msgs::PointCloud2 pc_msg_ground;
+    pcl::toROSMsg(*pc_ground, pc_msg_ground);
+    pc_msg_ground.header.stamp = pc_msg->header.stamp;
+    pc_msg_ground.header.frame_id = pc_msg->header.frame_id;
+    pub_ground_.publish(pc_msg_ground);
 
-    visualization_msgs::Marker region;
-    publish_pc(pub_ground_, filtered_ground_pc_ptr, in->header);
-    publish_pc(pub_no_ground_, filtered_no_ground_pc_ptr, in->header);
-    publish_marker(pub_marker_, filtered_ground_pc_ptr, region, in->header);
-
+    // Publish no ground points.
+    sensor_msgs::PointCloud2 pc_msg_no_ground;
+    pcl::toROSMsg(*pc_no_ground, pc_msg_no_ground);
+    pc_msg_no_ground.header.stamp = pc_msg->header.stamp;
+    pc_msg_no_ground.header.frame_id = pc_msg->header.frame_id;
+    pub_no_ground_.publish(pc_msg_no_ground);
+    
     ros::Time time_end = ros::Time::now();
-
-    if (show_points_size_ || show_time_)
+    
+    if(show_points_size_ || show_time_)
     {
-        std::cout<<""<<std::endl;
+        std::cout << "" << std::endl;
     }
-
-    if (show_points_size_)
+    
+    if(show_points_size_)
     {
-        std::cout<<"size of ground point clouds:"<<size_ground<<std::endl;
-        std::cout<<"size of no ground point clouds:"<<size_no_ground<<std::endl;
+        std::cout << "size of ground point clouds:" << pc_ground->points.size() << std::endl;
+        std::cout << "size of no ground point clouds:" << pc_no_ground->points.size() << std::endl;
     }
-
-    if (show_time_)
+    
+    if(show_time_)
     {
-        std::cout<<"cost time:"<<time_end - time_start<<"s"<<std::endl;
+        std::cout << "cost time:" << time_end - time_start << "s" << std::endl;
     }
 }
-
-

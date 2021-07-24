@@ -3,99 +3,109 @@
 #include <ros/ros.h>
 #include <limits.h>
 #include <float.h>
+#include <Eigen/Dense>
 #include <visualization_msgs/Marker.h>
 #include <visualization_msgs/MarkerArray.h>
 #include <geometry_msgs/Point.h>
 #include <std_msgs/Header.h>
+#include <sensor_msgs/PointCloud2.h>
 
 #include <pcl_conversions/pcl_conversions.h>
+#include <pcl/point_cloud.h>
 #include <pcl/point_types.h>
 #include <pcl/conversions.h>
 #include <pcl_ros/transforms.h>
+#include <pcl_ros/point_cloud.h>
 
 #include <pcl/filters/statistical_outlier_removal.h>
 #include <pcl/filters/voxel_grid.h>
 #include <pcl/filters/extract_indices.h>
+#include <pcl/filters/filter.h>
+#include <pcl/common/centroid.h>
 
-#include <sensor_msgs/PointCloud2.h>
+// To disable PCL complile lib and use PointXYZIR
+#define PCL_NO_PRECOMPILE
 
-#define PI 3.1415926
+
+namespace pgf
+{
+/** Euclidean coordinate, including intensity and ring number. */
+struct PointXYZIR
+{
+  PCL_ADD_POINT4D;                // quad-word XYZ
+  // float intensity;                // laser intensity reading
+  // uint16_t ring;                  // laser ring number
+  EIGEN_MAKE_ALIGNED_OPERATOR_NEW // ensure proper alignment
+} EIGEN_ALIGN16;
+
+/** Euclidean coordinate, including intensity and ring number, and label. */
+struct PointXYZIRL
+{
+  PCL_ADD_POINT4D;                // quad-word XYZ
+  // float intensity;                // laser intensity reading
+  // uint16_t ring;                  // laser ring number
+  uint16_t label;                 // point label: 0u - no ground, 1u - ground
+  EIGEN_MAKE_ALIGNED_OPERATOR_NEW // ensure proper alignment
+} EIGEN_ALIGN16;
+};
+
+
+// Register custom point struct according to PCL
+// POINT_CLOUD_REGISTER_POINT_STRUCT(pgf::PointXYZIR, (float, x, x)(float, y, y)(float, z, z)(float, intensity, intensity)(uint16_t, ring, ring))
+POINT_CLOUD_REGISTER_POINT_STRUCT(pgf::PointXYZIR, (float, x, x)(float, y, y)(float, z, z))
+
+// Register custom point struct according to PCL
+// POINT_CLOUD_REGISTER_POINT_STRUCT(pgf::PointXYZIRL, (float, x, x)(float, y, y)(float, z, z)(float, intensity, intensity)(uint16_t, ring, ring)(uint16_t, label, label))
+POINT_CLOUD_REGISTER_POINT_STRUCT(pgf::PointXYZIRL, (float, x, x)(float, y, y)(float, z, z)(uint16_t, label, label))
 
 class PointsGroundFilter
 {
 private:
+    ros::Subscriber sub_point_cloud_;
+    ros::Publisher pub_ground_;
+    ros::Publisher pub_no_ground_;
+  
     std::string sub_topic_;
     std::string pub_ground_topic_;
     std::string pub_no_ground_topic_;
-    std::string pub_marker_topic_;
     
     bool show_points_size_;
     bool show_time_;
-
+    
+    bool crop_range_mode_;
+    float range_front_;
+    float range_rear_;
+    float range_left_;
+    float range_right_;
+  
     float sensor_height_;
-    float radius_divider_;
-    float theta_divider_;
-    float local_slope_threshold_;
-    float general_slope_threshold_;
-    float curb_height_threshold_;
+    float seeds_distance_threshold_;
+    float ground_distance_threshold_;
+    int num_lpr_;
     
-    bool ground_filter_mode_;
-    float ground_meank_;
-    float ground_stdmul_;
+    int seg_num_front_;
+    int seg_num_rear_;
+    std::vector<float> seg_distance_front_;
+    std::vector<float> seg_distance_rear_;
     
-    bool no_ground_filter_mode_;
-    float no_ground_meank_;
-    float no_ground_stdmul_;
-
-    ros::Subscriber sub_;
-    ros::Publisher pub_ground_, pub_no_ground_, pub_marker_;
-    
-    struct PointXYZRTColor
-    {
-        pcl::PointXYZ point;
-
-        float radius; //XY平面极坐标系的半径
-        float theta;  //XY平面极坐标系的极角
-
-        size_t radius_idx; //径向索引
-        size_t theta_idx;  //周向索引
-
-        size_t original_idx; //在原始点云中的索引
-    };
-
-    struct PointR
-    {
-        geometry_msgs::Point point;
-
-        float radius; //XY平面极坐标系的半径
-    };
-
-    typedef std::vector<PointXYZRTColor> PointCloudXYZRTColor;
-    
-    void callback(const sensor_msgs::PointCloud2ConstPtr &in);
-    
-    void convert_XYZ_to_XYZRTColor(const pcl::PointCloud<pcl::PointXYZ>::Ptr in_pc_ptr,
-                        std::vector<PointCloudXYZRTColor> &out_pc);
-    
-    void classify_pc(std::vector<PointCloudXYZRTColor> &in_pc,
-                        pcl::PointIndices &ground_indices,
-                        pcl::PointIndices &no_ground_indices);
-
-    void publish_pc(const ros::Publisher &pub,
-                        const pcl::PointCloud<pcl::PointXYZ>::Ptr pc_ptr,
-                        const std_msgs::Header &header);
-    
-    void publish_marker(const ros::Publisher &pub,
-                        const pcl::PointCloud<pcl::PointXYZ>::Ptr in_pc_ptr,
-                        visualization_msgs::Marker &region,
-                        std_msgs::Header header);
+    void estimatePlane(const pcl::PointCloud<pgf::PointXYZIR>::Ptr pc,
+                       Eigen::MatrixXf& normal,
+                       float& d);
+    void extractInitialSeeds(const pcl::PointCloud<pgf::PointXYZIR>::Ptr pc_sorted,
+                             pcl::PointCloud<pgf::PointXYZIR>::Ptr pc_seeds);
+    void classifyPointCloudInSegment(pcl::PointCloud<pgf::PointXYZIR>::Ptr pc,
+                                     pcl::PointCloud<pgf::PointXYZIR>::Ptr pc_ground,
+                                     pcl::PointCloud<pgf::PointXYZIR>::Ptr pc_no_ground);
+    void classifyPointCloud(pcl::PointCloud<pgf::PointXYZIR>::Ptr pc,
+                            pcl::PointCloud<pgf::PointXYZIR>::Ptr pc_ground,
+                            pcl::PointCloud<pgf::PointXYZIR>::Ptr pc_no_ground);
+    void cropPointCloud(const pcl::PointCloud<pgf::PointXYZIR>::Ptr pc,
+                        pcl::PointCloud<pgf::PointXYZIR>::Ptr pc_cropped);
+    void callback(const sensor_msgs::PointCloud2ConstPtr pc_msg);
 
 public:
-    PointsGroundFilter(ros::NodeHandle &nh);
+    PointsGroundFilter(ros::NodeHandle& nh);
     ~PointsGroundFilter();
-    void Spin();
-
 };
-
 
 
