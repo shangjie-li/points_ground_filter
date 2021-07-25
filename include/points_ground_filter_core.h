@@ -27,7 +27,6 @@ private:
     std::string sub_topic_;
     std::string pub_ground_topic_;
     std::string pub_no_ground_topic_;
-    std::string pub_marker_topic_;
     
     bool show_points_size_;
     bool show_time_;
@@ -37,7 +36,6 @@ private:
     float theta_divider_;
     float local_slope_threshold_;
     float general_slope_threshold_;
-    float curb_height_threshold_;
     
     bool ground_filter_mode_;
     float ground_meank_;
@@ -48,53 +46,32 @@ private:
     float no_ground_stdmul_;
 
     ros::Subscriber sub_;
-    ros::Publisher pub_ground_, pub_no_ground_, pub_marker_;
+    ros::Publisher pub_ground_, pub_no_ground_;
     
     struct PointXYZRTColor
     {
         pcl::PointXYZ point;
 
-        float radius; //XY平面极坐标系的半径
-        float theta;  //XY平面极坐标系的极角
+        float radius; // radius to (0, 0).
+        float theta;  // polar angle in XY plane.
 
-        size_t radius_idx; //径向索引
-        size_t theta_idx;  //周向索引
+        size_t radius_idx;
+        size_t theta_idx;
 
-        size_t original_idx; //在原始点云中的索引
+        size_t original_idx; // index in the original point clouds.
     };
-
-    struct PointR
-    {
-        geometry_msgs::Point point;
-
-        float radius; //XY平面极坐标系的半径
-    };
-
-    typedef std::vector<PointXYZRTColor> PointCloudXYZRTColor;
     
-    void callback(const sensor_msgs::PointCloud2ConstPtr &in);
+    void convertPointCloud(const pcl::PointCloud<pcl::PointXYZ>::Ptr pc,
+                           std::vector<std::vector<PointXYZRTColor>>& pc_converted);
     
-    void convert_XYZ_to_XYZRTColor(const pcl::PointCloud<pcl::PointXYZ>::Ptr in_pc_ptr,
-                        std::vector<PointCloudXYZRTColor> &out_pc);
-    
-    void classify_pc(std::vector<PointCloudXYZRTColor> &in_pc,
-                        pcl::PointIndices &ground_indices,
-                        pcl::PointIndices &no_ground_indices);
-
-    void publish_pc(const ros::Publisher &pub,
-                        const pcl::PointCloud<pcl::PointXYZ>::Ptr pc_ptr,
-                        const std_msgs::Header &header);
-    
-    void publish_marker(const ros::Publisher &pub,
-                        const pcl::PointCloud<pcl::PointXYZ>::Ptr in_pc_ptr,
-                        visualization_msgs::Marker &region,
-                        std_msgs::Header header);
-
+    void classifyPointCloud(const std::vector<std::vector<PointXYZRTColor>>& pc,
+                            pcl::PointIndices& ground_indices,
+                            pcl::PointIndices& no_ground_indices);
+                        
+    void callback(const sensor_msgs::PointCloud2ConstPtr pc_msg);
 public:
-    PointsGroundFilter(ros::NodeHandle &nh);
+    PointsGroundFilter(ros::NodeHandle& nh);
     ~PointsGroundFilter();
-    void Spin();
-
 };
 
 
