@@ -12,16 +12,17 @@
         <param name="show_time" value="true"/>
         
         <param name="sensor_height" value="2.0"/>
+        <param name="max_distance" value="50.0"/>
         <param name="radius_divider" value="0.15"/>
         <param name="theta_divider" value="0.4"/>
         <param name="local_slope_threshold" value="10"/>
         <param name="general_slope_threshold" value="4"/>
         
-        <param name="ground_filter_mode" value="true"/>
+        <param name="ground_filter_mode" value="false"/>
         <param name="ground_meank" value="5"/>
         <param name="ground_stdmul" value="1.0"/>
         
-        <param name="no_ground_filter_mode" value="true"/>
+        <param name="no_ground_filter_mode" value="false"/>
         <param name="no_ground_meank" value="5"/>
         <param name="no_ground_stdmul" value="1.0"/>
         

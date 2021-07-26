@@ -32,6 +32,7 @@ private:
     bool show_time_;
 
     float sensor_height_;
+    float max_distance_;
     float radius_divider_;
     float theta_divider_;
     float local_slope_threshold_;
@@ -48,23 +49,16 @@ private:
     ros::Subscriber sub_;
     ros::Publisher pub_ground_, pub_no_ground_;
     
-    struct PointXYZRTColor
+    struct PointXYZICustom
     {
-        pcl::PointXYZ point;
-
-        float radius; // radius to (0, 0).
-        float theta;  // polar angle in XY plane.
-
-        size_t radius_idx;
-        size_t theta_idx;
-
+        pcl::PointXYZI point;
         size_t original_idx; // index in the original point clouds.
     };
     
-    void convertPointCloud(const pcl::PointCloud<pcl::PointXYZ>::Ptr pc,
-                           std::vector<std::vector<PointXYZRTColor>>& pc_converted);
+    void convertPointCloud(const pcl::PointCloud<pcl::PointXYZI>::Ptr pc,
+                           std::vector<std::vector<std::vector<PointXYZICustom>>>& pc_converted);
     
-    void classifyPointCloud(const std::vector<std::vector<PointXYZRTColor>>& pc,
+    void classifyPointCloud(const std::vector<std::vector<std::vector<PointXYZICustom>>>& pc,
                             pcl::PointIndices& ground_indices,
                             pcl::PointIndices& no_ground_indices);
                         
