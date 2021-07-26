@@ -23,7 +23,7 @@
 #include <pcl/filters/filter.h>
 #include <pcl/common/centroid.h>
 
-// To disable PCL complile lib and use PointXYZIR
+// To disable PCL compile lib and use PointXYZIR
 #define PCL_NO_PRECOMPILE
 
 
@@ -32,20 +32,20 @@ namespace pgf
 /** Euclidean coordinate, including intensity and ring number. */
 struct PointXYZIR
 {
-  PCL_ADD_POINT4D;                // quad-word XYZ
-  // float intensity;                // laser intensity reading
-  // uint16_t ring;                  // laser ring number
-  EIGEN_MAKE_ALIGNED_OPERATOR_NEW // ensure proper alignment
+    PCL_ADD_POINT4D;                // quad-word XYZ
+    float intensity;                // laser intensity reading
+    uint16_t ring;                  // laser ring number
+    EIGEN_MAKE_ALIGNED_OPERATOR_NEW // ensure proper alignment
 } EIGEN_ALIGN16;
 
 /** Euclidean coordinate, including intensity and ring number, and label. */
 struct PointXYZIRL
 {
-  PCL_ADD_POINT4D;                // quad-word XYZ
-  // float intensity;                // laser intensity reading
-  // uint16_t ring;                  // laser ring number
-  uint16_t label;                 // point label: 0u - no ground, 1u - ground
-  EIGEN_MAKE_ALIGNED_OPERATOR_NEW // ensure proper alignment
+    PCL_ADD_POINT4D;                // quad-word XYZ
+    float intensity;                // laser intensity reading
+    uint16_t ring;                  // laser ring number
+    uint16_t label;                 // point label: 0u - no ground, 1u - ground
+    EIGEN_MAKE_ALIGNED_OPERATOR_NEW // ensure proper alignment
 } EIGEN_ALIGN16;
 };
 
