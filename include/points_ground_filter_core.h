@@ -3,21 +3,49 @@
 #include <ros/ros.h>
 #include <limits.h>
 #include <float.h>
+#include <Eigen/Dense>
 #include <visualization_msgs/Marker.h>
 #include <visualization_msgs/MarkerArray.h>
 #include <geometry_msgs/Point.h>
 #include <std_msgs/Header.h>
+#include <sensor_msgs/PointCloud2.h>
 
 #include <pcl_conversions/pcl_conversions.h>
+#include <pcl/point_cloud.h>
 #include <pcl/point_types.h>
 #include <pcl/conversions.h>
 #include <pcl_ros/transforms.h>
+#include <pcl_ros/point_cloud.h>
 
 #include <pcl/filters/statistical_outlier_removal.h>
 #include <pcl/filters/voxel_grid.h>
 #include <pcl/filters/extract_indices.h>
+#include <pcl/filters/filter.h>
+#include <pcl/common/centroid.h>
 
-#include <sensor_msgs/PointCloud2.h>
+
+// To disable PCL compile lib and use PointXYZICustom
+#define PCL_NO_PRECOMPILE
+
+
+namesapce pgf
+{
+/** Euclidean coordinate, including intensity and index in custom array. */
+struct PointXYZICustom
+{
+    PCL_ADD_POINT4D; // quad-word XYZ
+    float intensity; // laser intensity reading
+    
+    uint16_t theta_idx;
+    uint16_t radius_idx;
+    EIGEN_MAKE_ALIGNED_OPERATOR_NEW // ensure proper alignment
+} EIGEN_ALIGN16;
+};
+
+
+// Register custom point struct according to PCL
+POINT_CLOUD_REGISTER_POINT_STRUCT(pgf::PointXYZICustom, (float, x, x)(float, y, y)(float, z, z)(float, intensity, intensity)(uint16_t, theta_idx, theta_idx)(uint16_t, theta_idx, theta_idx))
+
 
 #define PI 3.1415926
 
@@ -49,18 +77,15 @@ private:
     ros::Subscriber sub_;
     ros::Publisher pub_ground_, pub_no_ground_;
     
-    struct PointXYZICustom
-    {
-        pcl::PointXYZI point;
-        size_t original_idx; // index in the original point clouds.
-    };
+    std::vector<std::vector<float>> sum_z_array_;
+    std::vector<std::vector<int>> num_array_;
+    std::vector<std::vector<int>> label_array_;
     
-    void convertPointCloud(const pcl::PointCloud<pcl::PointXYZI>::Ptr pc,
-                           std::vector<std::vector<std::vector<PointXYZICustom>>>& pc_converted);
+    void convertPointCloud(pcl::PointCloud<pgf::PointXYZICustom>::Ptr pc);
     
-    void classifyPointCloud(const std::vector<std::vector<std::vector<PointXYZICustom>>>& pc,
-                            pcl::PointIndices& ground_indices,
-                            pcl::PointIndices& no_ground_indices);
+    void classifyPointCloud(const pcl::PointCloud<pgf::PointXYZICustom>::Ptr pc,
+                            pcl::PointCloud<pcl::PointXYZI>::Ptr pc_ground,
+                            pcl::PointCloud<pcl::PointXYZI>::Ptr pc_no_ground);
                         
     void callback(const sensor_msgs::PointCloud2ConstPtr pc_msg);
 public:

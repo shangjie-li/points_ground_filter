@@ -33,29 +33,52 @@ PointsGroundFilter::PointsGroundFilter(ros::NodeHandle& nh)
 
 PointsGroundFilter::~PointsGroundFilter(){}
 
-void PointsGroundFilter::convertPointCloud(const pcl::PointCloud<pcl::PointXYZI>::Ptr pc,
-                                           std::vector<std::vector<std::vector<PointXYZICustom>>>& pc_converted)
+void PointsGroundFilter::convertPointCloud(pcl::PointCloud<pgf::PointXYZICustom>::Ptr pc)
 {
     // floor(x)返回小于或等于x的最大整数
     // ceil(x)返回大于x的最小整数
     size_t num_theta = ceil(360 / theta_divider_);
     size_t num_radius = ceil(max_distance_ / radius_divider_);
 
-    // pc_converted中包含num_theta条射线，每条射线包含num_radius个扇形单元格
-    // 每个单元格内存储PointXYZICustom类型点的集合
-    pc_converted.resize(num_theta);
-    for(size_t j = 0; j < pc_converted.size(); j++)
+    // sum_z_array_中包含num_theta条射线，每条射线包含num_radius个扇形单元格，每个单元格存储高度之和
+    sum_z_array_.resize(num_theta);
+    for(size_t i = 0; i < sum_z_array_.size(); i++)
     {
-        pc_converted[j].resize(num_radius);
+        sum_z_array_[i].resize(num_radius);
+        for(size_t j = 0; j < sum_z_array_[i].size(); j++)
+        {
+            sum_z_array_[i][j] = 0.0;
+        }
+    }
+    
+    // num_array_中包含num_theta条射线，每条射线包含num_radius个扇形单元格，每个单元格存储点云数量
+    num_array_.resize(num_theta);
+    for(size_t i = 0; i < num_array_.size(); i++)
+    {
+        num_array_[i].resize(num_radius);
+        for(size_t j = 0; j < num_array_[i].size(); j++)
+        {
+            num_array_[i][j] = 0;
+        }
+    }
+    
+    // label_array_中包含num_theta条射线，每条射线包含num_radius个扇形单元格，每个单元格存储标签值，0为地面，1非地面
+    label_array_.resize(num_theta);
+    for(size_t i = 0; i < label_array_.size(); i++)
+    {
+        label_array_[i].resize(num_radius);
+        for(size_t j = 0; j < label_array_[i].size(); j++)
+        {
+            label_array_[i][j] = 0;
+        }
     }
 
     // 以扇形单元格的形式组织点云
     #pragma omp for
-    for(size_t i = 0; i < pc->points.size(); i++)
+    for(size_t r = 0; r < pc->points.size(); r++)
     {
-        PointXYZICustom new_point;
-        float radius = sqrt(pc->points[i].x * pc->points[i].x + pc->points[i].y * pc->points[i].y);
-        float theta = atan2(pc->points[i].y, pc->points[i].x) * 180 / PI;
+        float radius = sqrt(pc->points[r].x * pc->points[r].x + pc->points[r].y * pc->points[r].y);
+        float theta = atan2(pc->points[r].y, pc->points[r].x) * 180 / PI;
         if(theta < 0)
         {
             theta += 360;
@@ -63,24 +86,22 @@ void PointsGroundFilter::convertPointCloud(const pcl::PointCloud<pcl::PointXYZI>
 
         size_t radius_idx = floor(radius / radius_divider_);
         size_t theta_idx = floor(theta / theta_divider_);
-
-        new_point.point = pc->points[i];
-        new_point.original_idx = i;
-
-        if(radius_idx < num_radius) {pc_converted[theta_idx][radius_idx].push_back(new_point);}
+        
+        pc->points[r].radius_idx = radius_idx;
+        pc->points[r].theta_idx = theta_idx;
+        
+        sum_z_array_[theta_idx][radius_idx] += pc->points[r].z;
+        num_array_[theta_idx][radius_idx] += 1;
     }
 }
 
-void PointsGroundFilter::classifyPointCloud(const std::vector<std::vector<std::vector<PointXYZICustom>>>& pc,
-                                            pcl::PointIndices& ground_indices,
-                                            pcl::PointIndices& no_ground_indices)
+void PointsGroundFilter::classifyPointCloud(const pcl::PointCloud<pgf::PointXYZICustom>::Ptr pc,
+                                            pcl::PointCloud<pcl::PointXYZI>::Ptr pc_ground,
+                                            pcl::PointCloud<pcl::PointXYZI>::Ptr pc_no_ground)
 {
-    ground_indices.indices.clear();
-    no_ground_indices.indices.clear();
-    
     // 遍历每一条射线
     #pragma omp for
-    for(size_t i = 0; i < pc.size(); i++)
+    for(size_t i = 0; i < num_array_.size(); i++)
     {
         float pre_radius;
         float pre_z;
@@ -88,17 +109,15 @@ void PointsGroundFilter::classifyPointCloud(const std::vector<std::vector<std::v
         bool initialized = false;
         
         // 遍历射线上的每一个扇形单元格
-        for(size_t j = 0; j < pc[i].size(); j++) 
+        for(size_t j = 0; j < num_array_[i].size(); j++) 
         {
             float cur_radius = radius_divider_ * j;
             float cur_z;
             bool cur_ground;
             
-            if(pc[i][j].size() == 0) {continue;}
-            
-            float sum_z = 0;
-            for(size_t r = 0; r < pc[i][j].size(); r++) {sum_z += pc[i][j][r].point.z;}
-            cur_z = sum_z / pc[i][j].size();
+            if(num_array_[i][j] == 0) {continue;}
+
+            cur_z = sum_z_array_[i][j] / num_array_[i][j];
 
             // abs(x)对int变量求绝对值
             // fabs(x)对float变量或double变量求绝对值
@@ -132,24 +151,40 @@ void PointsGroundFilter::classifyPointCloud(const std::vector<std::vector<std::v
                 else {cur_ground = false;}
             }
             
-            if(cur_ground)
-            {
-                for(size_t r = 0; r < pc[i][j].size(); r++)
-                {
-                    ground_indices.indices.push_back(pc[i][j][r].original_idx);
-                }
-            }
-            else
-            {
-                for(size_t r = 0; r < pc[i][j].size(); r++)
-                {
-                    no_ground_indices.indices.push_back(pc[i][j][r].original_idx);
-                }
-            }
+            if(cur_ground) {label_array_[i][j] = 0;}
+            else {label_array_[i][j] = 1;}
 
             pre_radius = cur_radius;
             pre_z = cur_z;
             pre_ground = cur_ground;
+        }
+    }
+    
+    size_t num_theta = ceil(360 / theta_divider_);
+    size_t num_radius = ceil(max_distance_ / radius_divider_);
+    
+    // 遍历每一个点
+    #pragma omp for
+    for(size_t r = 0; r < pc->points.size(); r++)
+    {
+        size_t theta_idx = pc->points[r].theta_idx_;
+        size_t radius_idx = pc->points[r].radius_idx_;
+        if(theta_idx < num_theta && radius_idx < num_radius)
+        {
+            pcl::PointXYZI point;
+            point.x = pc->points[r].x;
+            point.y = pc->points[r].y;
+            point.z = pc->points[r].z;
+            point.intensity = pc->points[r].intensity;
+            
+            if(label_array_[theta_idx][radius_idx] == 0)
+            {
+                pc_ground->points.push_back(point);
+            }
+            else
+            {
+                pc_no_ground->points.push_back(point);
+            }
         }
     }
 }
@@ -158,33 +193,19 @@ void PointsGroundFilter::callback(const sensor_msgs::PointCloud2ConstPtr pc_msg)
 {
     ros::Time time_start = ros::Time::now();
     
-    pcl::PointCloud<pcl::PointXYZI>::Ptr pc_current(new pcl::PointCloud<pcl::PointXYZI>);
+    pcl::PointCloud<pgf::PointXYZICustom>::Ptr pc_current(new pcl::PointCloud<pgf::PointXYZICustom>);
     pcl::fromROSMsg(*pc_msg, *pc_current);
 
     // 组织点云
-    std::vector<std::vector<std::vector<PointXYZICustom>>> pc_organized;
-    convertPointCloud(pc_current, pc_organized);
-
+    convertPointCloud(pc_current);
+    
     // 判定地面点云和非地面点云
-    pcl::PointIndices ground_indices, no_ground_indices;
-    classifyPointCloud(pc_organized, ground_indices, no_ground_indices);
-
     pcl::PointCloud<pcl::PointXYZI>::Ptr pc_ground(new pcl::PointCloud<pcl::PointXYZI>);
     pcl::PointCloud<pcl::PointXYZI>::Ptr pc_no_ground(new pcl::PointCloud<pcl::PointXYZI>);
+    classifyPointCloud(pc_current, pc_ground, pc_no_ground);
+    
     pcl::PointCloud<pcl::PointXYZI>::Ptr pc_ground_filtered(new pcl::PointCloud<pcl::PointXYZI>);
     pcl::PointCloud<pcl::PointXYZI>::Ptr pc_no_ground_filtered(new pcl::PointCloud<pcl::PointXYZI>);
-
-    pcl::ExtractIndices<pcl::PointXYZI> extractor_ground;
-    extractor_ground.setInputCloud(pc_current);
-    extractor_ground.setIndices(boost::make_shared<pcl::PointIndices>(ground_indices));
-    extractor_ground.setNegative(false); // true removes the indices, false leaves only the indices
-    extractor_ground.filter(*pc_ground);
-
-    pcl::ExtractIndices<pcl::PointXYZI> extractor_no_ground;
-    extractor_no_ground.setInputCloud(pc_current);
-    extractor_no_ground.setIndices(boost::make_shared<pcl::PointIndices>(no_ground_indices));
-    extractor_no_ground.setNegative(false); // true removes the indices, false leaves only the indices
-    extractor_no_ground.filter(*pc_no_ground);
     
     // 针对pc_ground滤波
     if(ground_filter_mode_)
