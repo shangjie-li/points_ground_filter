@@ -167,8 +167,8 @@ void PointsGroundFilter::classifyPointCloud(const pcl::PointCloud<pgf::PointXYZI
     #pragma omp for
     for(size_t r = 0; r < pc->points.size(); r++)
     {
-        size_t theta_idx = pc->points[r].theta_idx_;
-        size_t radius_idx = pc->points[r].radius_idx_;
+        size_t theta_idx = pc->points[r].theta_idx;
+        size_t radius_idx = pc->points[r].radius_idx;
         if(theta_idx < num_theta && radius_idx < num_radius)
         {
             pcl::PointXYZI point;

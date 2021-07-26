@@ -28,7 +28,7 @@
 #define PCL_NO_PRECOMPILE
 
 
-namesapce pgf
+namespace pgf
 {
 /** Euclidean coordinate, including intensity and index in custom array. */
 struct PointXYZICustom
@@ -44,7 +44,7 @@ struct PointXYZICustom
 
 
 // Register custom point struct according to PCL
-POINT_CLOUD_REGISTER_POINT_STRUCT(pgf::PointXYZICustom, (float, x, x)(float, y, y)(float, z, z)(float, intensity, intensity)(uint16_t, theta_idx, theta_idx)(uint16_t, theta_idx, theta_idx))
+POINT_CLOUD_REGISTER_POINT_STRUCT(pgf::PointXYZICustom, (float, x, x)(float, y, y)(float, z, z)(float, intensity, intensity)(uint16_t, theta_idx, theta_idx)(uint16_t, radius_idx, radius_idx))
 
 
 #define PI 3.1415926
