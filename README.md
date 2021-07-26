@@ -23,6 +23,7 @@ ROS package for filtering groud points
    <param name="show_time" value="true"/>
 
    <param name="sensor_height" value="2.0"/>
+   <param name="max_distance" value="50.0"/>
    <param name="radius_divider" value="0.15"/>
    <param name="theta_divider" value="0.4"/>
    <param name="local_slope_threshold" value="10"/>
@@ -40,6 +41,7 @@ ROS package for filtering groud points
     - `pub_ground_topic`指明发布的只包含地面点云的点云话题。
     - `pub_no_ground_topic`指明发布的不包含地面点云的点云话题。
     - `sensor_height`为传感器距地面高度，单位为米。
+    - `max_distance`为滤波范围，单位为米。
     - `radius_divider`为径向距离单元的长度，单位为米。
     - `theta_divider`为激光雷达水平角分辨率，单位为度。
     - `local_slope_threshold`为局部坡度阈值，单位为度。
