@@ -23,10 +23,10 @@
 #include <pcl/filters/filter.h>
 #include <pcl/common/centroid.h>
 
+#include "opencv2/opencv.hpp"
 
 // To disable PCL compile lib and use PointXYZICustom
 #define PCL_NO_PRECOMPILE
-
 
 namespace pgf
 {
@@ -36,16 +36,14 @@ struct PointXYZICustom
     PCL_ADD_POINT4D; // quad-word XYZ
     float intensity; // laser intensity reading
     
-    uint16_t theta_idx;
-    uint16_t radius_idx;
+    int16_t x_idx;
+    int16_t y_idx;
     EIGEN_MAKE_ALIGNED_OPERATOR_NEW // ensure proper alignment
 } EIGEN_ALIGN16;
 };
 
-
 // Register custom point struct according to PCL
-POINT_CLOUD_REGISTER_POINT_STRUCT(pgf::PointXYZICustom, (float, x, x)(float, y, y)(float, z, z)(float, intensity, intensity)(uint16_t, theta_idx, theta_idx)(uint16_t, radius_idx, radius_idx))
-
+POINT_CLOUD_REGISTER_POINT_STRUCT(pgf::PointXYZICustom, (float, x, x)(float, y, y)(float, z, z)(float, intensity, intensity)(int16_t, x_idx, x_idx)(int16_t, y_idx, y_idx))
 
 #define PI 3.1415926
 
@@ -59,12 +57,11 @@ private:
     bool show_points_size_;
     bool show_time_;
 
-    float sensor_height_;
-    float max_distance_;
-    float radius_divider_;
-    float theta_divider_;
+    float max_x_;
+    float max_y_;
+    float x_divider_;
+    float y_divider_;
     float local_slope_threshold_;
-    float general_slope_threshold_;
     
     bool ground_filter_mode_;
     float ground_meank_;
@@ -77,9 +74,9 @@ private:
     ros::Subscriber sub_;
     ros::Publisher pub_ground_, pub_no_ground_;
     
-    std::vector<std::vector<float>> sum_z_array_;
-    std::vector<std::vector<int>> num_array_;
-    std::vector<std::vector<int>> label_array_;
+    cv::Mat height_mat_;
+    cv::Mat num_mat_;
+    cv::Mat slope_mat_;
     
     void convertPointCloud(pcl::PointCloud<pgf::PointXYZICustom>::Ptr pc);
     
@@ -92,6 +89,4 @@ public:
     PointsGroundFilter(ros::NodeHandle& nh);
     ~PointsGroundFilter();
 };
-
-
 

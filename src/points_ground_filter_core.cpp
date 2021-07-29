@@ -9,12 +9,11 @@ PointsGroundFilter::PointsGroundFilter(ros::NodeHandle& nh)
     nh.param<bool>("show_points_size", show_points_size_, false);
     nh.param<bool>("show_time", show_time_, false);
 
-    nh.param<float>("sensor_height", sensor_height_, 2.0);
-    nh.param<float>("max_distance", max_distance_, 50.0);
-    nh.param<float>("radius_divider", radius_divider_, 0.15);
-    nh.param<float>("theta_divider", theta_divider_, 0.4);
+    nh.param<float>("max_x", max_x_, 50.0);
+    nh.param<float>("max_y", max_y_, 15.0);
+    nh.param<float>("x_divider", x_divider_, 0.15);
+    nh.param<float>("y_divider", y_divider_, 0.15);
     nh.param<float>("local_slope_threshold", local_slope_threshold_, 10);
-    nh.param<float>("general_slope_threshold", general_slope_threshold_, 4);
     
     nh.param<bool>("ground_filter_mode", ground_filter_mode_, false);
     nh.param<float>("ground_meank", ground_meank_, 5);
@@ -35,63 +34,33 @@ PointsGroundFilter::~PointsGroundFilter(){}
 
 void PointsGroundFilter::convertPointCloud(pcl::PointCloud<pgf::PointXYZICustom>::Ptr pc)
 {
-    // floor(x)返回小于或等于x的最大整数
-    // ceil(x)返回大于x的最小整数
-    size_t num_theta = ceil(360 / theta_divider_);
-    size_t num_radius = ceil(max_distance_ / radius_divider_);
-
-    // sum_z_array_中包含num_theta条射线，每条射线包含num_radius个扇形单元格，每个单元格存储高度之和
-    sum_z_array_.resize(num_theta);
-    for(size_t i = 0; i < sum_z_array_.size(); i++)
-    {
-        sum_z_array_[i].resize(num_radius);
-        for(size_t j = 0; j < sum_z_array_[i].size(); j++)
-        {
-            sum_z_array_[i][j] = 0.0;
-        }
-    }
+    int nx = ceil(max_x_ / x_divider_);
+    int ny = ceil(max_y_ / y_divider_);
+    int cols = 2 * nx;
+    int rows = 2 * ny;
     
-    // num_array_中包含num_theta条射线，每条射线包含num_radius个扇形单元格，每个单元格存储点云数量
-    num_array_.resize(num_theta);
-    for(size_t i = 0; i < num_array_.size(); i++)
-    {
-        num_array_[i].resize(num_radius);
-        for(size_t j = 0; j < num_array_[i].size(); j++)
-        {
-            num_array_[i][j] = 0;
-        }
-    }
+    height_mat_ = cv::Mat::zeros(rows, cols, CV_32FC1);
+    num_mat_ = cv::Mat::zeros(rows, cols, CV_32FC1);
+    slope_mat_ = cv::Mat::zeros(rows, cols, CV_32FC1);
     
-    // label_array_中包含num_theta条射线，每条射线包含num_radius个扇形单元格，每个单元格存储标签值，0为地面，1非地面
-    label_array_.resize(num_theta);
-    for(size_t i = 0; i < label_array_.size(); i++)
-    {
-        label_array_[i].resize(num_radius);
-        for(size_t j = 0; j < label_array_[i].size(); j++)
-        {
-            label_array_[i][j] = 0;
-        }
-    }
-
-    // 以扇形单元格的形式组织点云
+    // Compute sum height in cells.
     #pragma omp for
-    for(size_t r = 0; r < pc->points.size(); r++)
+    for(int r = 0; r < pc->points.size(); r++)
     {
-        float radius = sqrt(pc->points[r].x * pc->points[r].x + pc->points[r].y * pc->points[r].y);
-        float theta = atan2(pc->points[r].y, pc->points[r].x) * 180 / PI;
-        if(theta < 0)
-        {
-            theta += 360;
-        }
+        int x_idx = floor(pc->points[r].x / x_divider_);
+        int y_idx = floor(pc->points[r].y / y_divider_);
+        
+        pc->points[r].x_idx = x_idx;
+        pc->points[r].y_idx = y_idx;
 
-        size_t radius_idx = floor(radius / radius_divider_);
-        size_t theta_idx = floor(theta / theta_divider_);
+        int col = nx + x_idx;
+        int row = ny - y_idx;
         
-        pc->points[r].radius_idx = radius_idx;
-        pc->points[r].theta_idx = theta_idx;
-        
-        sum_z_array_[theta_idx][radius_idx] += pc->points[r].z;
-        num_array_[theta_idx][radius_idx] += 1;
+        if(row >= 0 && row < rows && col >=0 && col < cols)
+        {
+            height_mat_.at<float>(row, col) += pc->points[r].z;
+            num_mat_.at<float>(row, col) += 1;
+        }
     }
 }
 
@@ -99,77 +68,74 @@ void PointsGroundFilter::classifyPointCloud(const pcl::PointCloud<pgf::PointXYZI
                                             pcl::PointCloud<pcl::PointXYZI>::Ptr pc_ground,
                                             pcl::PointCloud<pcl::PointXYZI>::Ptr pc_no_ground)
 {
-    // 遍历每一条射线
+    int nx = ceil(max_x_ / x_divider_);
+    int ny = ceil(max_y_ / y_divider_);
+    int cols = 2 * nx;
+    int rows = 2 * ny;
+    
+    // Compute mean height in cells.
+    height_mat_ /= num_mat_;
+    
+    // Compute local slope.
     #pragma omp for
-    for(size_t i = 0; i < num_array_.size(); i++)
+    for(int i = 1; i < rows - 1; i++)
     {
-        float pre_radius;
-        float pre_z;
-        bool pre_ground;
-        bool initialized = false;
-        
-        // 遍历射线上的每一个扇形单元格
-        for(size_t j = 0; j < num_array_[i].size(); j++) 
+        for(int j = 1; j < cols - 1; j++) 
         {
-            float cur_radius = radius_divider_ * j;
-            float cur_z;
-            bool cur_ground;
-            
-            if(num_array_[i][j] == 0) {continue;}
-
-            cur_z = sum_z_array_[i][j] / num_array_[i][j];
-
-            // abs(x)对int变量求绝对值
-            // fabs(x)对float变量或double变量求绝对值
-            // atan(x)表示x的反正切，其返回值为[-pi/2, +pi/2]之间的一个数
-            // atan2(y, x)表示y / x的反正切，其返回值为[-pi, +pi]之间的一个数
-            
-            if(!initialized)
-            {
-                // 根据全局坡度判定
-                float slope_g = atan2(fabs(cur_z - (- sensor_height_)), cur_radius) * 180 / PI;
-                if(slope_g <= general_slope_threshold_) {cur_ground = true;}
-                else {cur_ground = false;}
-                
-                initialized = true;
-            }
+            if(num_mat_.at<float>(i, j) == 0) {continue;}
             else
             {
-                // 根据局部坡度判定
-                float slope_l = atan2(fabs(cur_z - pre_z), (cur_radius - pre_radius)) * 180 / PI;
-                if(slope_l <= local_slope_threshold_)
+                float z1, z2, slope;
+                float max_slope = 0;
+                z1 = height_mat_.at<float>(i, j);
+                
+                if(num_mat_.at<float>(i - 1, j) != 0)
                 {
-                    if(pre_ground) {cur_ground = true;}
-                    else
-                    {
-                        // 根据全局坡度判定
-                        float slope_g = atan2(fabs(cur_z - (- sensor_height_)), cur_radius) * 180 / PI;
-                        if(slope_g <= general_slope_threshold_) {cur_ground = true;}
-                        else {cur_ground = false;}
-                    }
+                    z2 = height_mat_.at<float>(i - 1, j);
+                    slope = atan2(fabs(z1 - z2), y_divider_) * 180 / PI;
+                    max_slope = slope > max_slope ? slope : max_slope;
                 }
-                else {cur_ground = false;}
+                if(num_mat_.at<float>(i + 1, j) != 0)
+                {
+                    z2 = height_mat_.at<float>(i + 1, j);
+                    slope = atan2(fabs(z1 - z2), y_divider_) * 180 / PI;
+                    max_slope = slope > max_slope ? slope : max_slope;
+                }
+                if(num_mat_.at<float>(i, j - 1) != 0)
+                {
+                    z2 = height_mat_.at<float>(i, j - 1);
+                    slope = atan2(fabs(z1 - z2), x_divider_) * 180 / PI;
+                    max_slope = slope > max_slope ? slope : max_slope;
+                }
+                if(num_mat_.at<float>(i, j + 1) != 0)
+                {
+                    z2 = height_mat_.at<float>(i, j + 1);
+                    slope = atan2(fabs(z1 - z2), x_divider_) * 180 / PI;
+                    max_slope = slope > max_slope ? slope : max_slope;
+                }
+                slope_mat_.at<float>(i, j) = max_slope;
             }
-            
-            if(cur_ground) {label_array_[i][j] = 0;}
-            else {label_array_[i][j] = 1;}
-
-            pre_radius = cur_radius;
-            pre_z = cur_z;
-            pre_ground = cur_ground;
         }
     }
     
-    size_t num_theta = ceil(360 / theta_divider_);
-    size_t num_radius = ceil(max_distance_ / radius_divider_);
+    cv::Mat tmp(rows, cols, CV_8UC1);
+    cv::threshold(slope_mat_, tmp, local_slope_threshold_, 255, cv::THRESH_BINARY);
     
-    // 遍历每一个点
+    cv::Mat labels, stats, centroids;
+    tmp.convertTo(tmp, CV_8UC1);
+    int nccomps = cv::connectedComponentsWithStats(tmp, labels, stats, centroids);
+    
+    // Classify ground points and no ground points.
     #pragma omp for
-    for(size_t r = 0; r < pc->points.size(); r++)
+    for(int r = 0; r < pc->points.size(); r++)
     {
-        size_t theta_idx = pc->points[r].theta_idx;
-        size_t radius_idx = pc->points[r].radius_idx;
-        if(theta_idx < num_theta && radius_idx < num_radius)
+        int x_idx = pc->points[r].x_idx;
+        int y_idx = pc->points[r].y_idx;
+        
+        int col = nx + x_idx;
+        int row = ny - y_idx;
+        
+        if(row >= 0 && row < rows && col >=0 && col < cols)
         {
             pcl::PointXYZI point;
             point.x = pc->points[r].x;
@@ -177,7 +143,10 @@ void PointsGroundFilter::classifyPointCloud(const pcl::PointCloud<pgf::PointXYZI
             point.z = pc->points[r].z;
             point.intensity = pc->points[r].intensity;
             
-            if(label_array_[theta_idx][radius_idx] == 0)
+            // labels.type(): CV_32F
+            // labels(row, col): 0 - background;
+            //                   1, 2, ... - connected components (descend as size of area).
+            if(labels.at<int>(row, col) == 0)
             {
                 pc_ground->points.push_back(point);
             }
