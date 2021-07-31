@@ -8,7 +8,6 @@
 #include <visualization_msgs/MarkerArray.h>
 #include <geometry_msgs/Point.h>
 #include <std_msgs/Header.h>
-#include <sensor_msgs/PointCloud2.h>
 
 #include <pcl_conversions/pcl_conversions.h>
 #include <pcl/point_cloud.h>
@@ -23,7 +22,10 @@
 #include <pcl/filters/filter.h>
 #include <pcl/common/centroid.h>
 
+#include <sensor_msgs/PointCloud2.h>
 #include "opencv2/opencv.hpp"
+
+#define PI 3.1415926
 
 // To disable PCL compile lib and use PointXYZICustom
 #define PCL_NO_PRECOMPILE
@@ -43,9 +45,7 @@ struct PointXYZICustom
 };
 
 // Register custom point struct according to PCL
-POINT_CLOUD_REGISTER_POINT_STRUCT(pgf::PointXYZICustom, (float, x, x)(float, y, y)(float, z, z)(float, intensity, intensity)(int16_t, x_idx, x_idx)(int16_t, y_idx, y_idx))
-
-#define PI 3.1415926
+POINT_CLOUD_REGISTER_POINT_STRUCT(pgf::PointXYZICustom, (float, x, x)(float, y, y)(float, z, z)(float, intensity, intensity))
 
 class PointsGroundFilter
 {
@@ -79,11 +79,9 @@ private:
     cv::Mat slope_mat_;
     
     void convertPointCloud(pcl::PointCloud<pgf::PointXYZICustom>::Ptr pc);
-    
     void classifyPointCloud(const pcl::PointCloud<pgf::PointXYZICustom>::Ptr pc,
                             pcl::PointCloud<pcl::PointXYZI>::Ptr pc_ground,
                             pcl::PointCloud<pcl::PointXYZI>::Ptr pc_no_ground);
-                        
     void callback(const sensor_msgs::PointCloud2ConstPtr pc_msg);
 public:
     PointsGroundFilter(ros::NodeHandle& nh);
