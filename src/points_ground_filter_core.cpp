@@ -58,12 +58,11 @@ void PointsGroundFilter::estimatePlane(const pcl::PointCloud<pgf::PointXYZIR>::P
                                        float& d)
 {
     // Create covarian matrix in single pass.
-    // TODO: compare the efficiency.
     Eigen::Matrix3f cov;
     Eigen::Vector4f pc_mean;
     pcl::computeMeanAndCovarianceMatrix(*pc, cov, pc_mean);
     
-    // Singular Value Decomposition: SVD
+    // Do singular value decomposition.
     Eigen::JacobiSVD<Eigen::MatrixXf> svd(cov, Eigen::DecompositionOptions::ComputeFullU);
     
     // Use the least singular vector as normal.
@@ -120,7 +119,8 @@ void PointsGroundFilter::classifyPointCloudInSegment(pcl::PointCloud<pgf::PointX
     sort(pc->points.begin(), pc->end(), compareZ);
     
     // 2.Removal error point.
-    // As there are some error mirror reflection under the ground, here regardless point under -1.5 * sensor_height_.
+    // As there are some error mirror reflection under the ground,
+    // here regardless point under -1.5 * sensor_height_.
     // Sort point according to height, here uses z-axis in default.
     pcl::PointCloud<pgf::PointXYZIR>::iterator it = pc->points.begin();
     for(int i = 0; i < pc->points.size(); i++)
@@ -139,7 +139,8 @@ void PointsGroundFilter::classifyPointCloudInSegment(pcl::PointCloud<pgf::PointX
     float d;
     estimatePlane(pc_seeds, normal, d);
     
-    // 5.Filter point clouds by distance threshold, considering sqrt(a * a + b * b + c * c) = 1.
+    // 5.Filter point clouds by distance threshold,
+    // considering sqrt(a * a + b * b + c * c) = 1.
     // Now the pc->points.size() is less than the size of original point clouds.
     float a = normal(0);
     float b = normal(1);
@@ -239,22 +240,6 @@ void PointsGroundFilter::callback(const sensor_msgs::PointCloud2ConstPtr pc_msg)
     pcl::PointCloud<pgf::PointXYZIR>::Ptr pc(new pcl::PointCloud<pgf::PointXYZIR>);
     pcl::fromROSMsg(*pc_msg, *pc);
     
-    /*
-    // Copy the original point clouds.
-    pcl::PointCloud<pgf::PointXYZIR>::Ptr pc_all(new pcl::PointCloud<pgf::PointXYZIR>);
-    pgf::PointXYZIRL point;
-    for(size_t i = 0; i < pc->points.size(); i++)
-    {
-        point.x = pc->points[i].x;
-        point.y = pc->points[i].y;
-        point.z = pc->points[i].z;
-        point.label = 0u;
-        point.intensity = pc->points[i].intensity;
-        point.ring = pc->points[i].ring;
-        pc_all->points.push_back(point);
-    }
-    */
-    
     pcl::PointCloud<pgf::PointXYZIR>::Ptr pc_cropped(new pcl::PointCloud<pgf::PointXYZIR>);
     if(crop_range_mode_)
     {
@@ -289,16 +274,17 @@ void PointsGroundFilter::callback(const sensor_msgs::PointCloud2ConstPtr pc_msg)
     if(show_points_size_ || show_time_)
     {
         std::cout << "" << std::endl;
+        std::cout << "[points_ground_filter]" << std::endl;
     }
     
     if(show_points_size_)
     {
-        std::cout << "size of ground point clouds:" << pc_ground->points.size() << std::endl;
-        std::cout << "size of no ground point clouds:" << pc_no_ground->points.size() << std::endl;
+        std::cout << "Size of ground point clouds: " << pc_ground->points.size() << std::endl;
+        std::cout << "Size of no ground point clouds: " << pc_no_ground->points.size() << std::endl;
     }
     
     if(show_time_)
     {
-        std::cout << "cost time:" << time_end - time_start << "s" << std::endl;
+        std::cout << "Time cost per frame: " << time_end - time_start << "s" << std::endl;
     }
 }

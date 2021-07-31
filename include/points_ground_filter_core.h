@@ -26,7 +26,6 @@
 // To disable PCL compile lib and use PointXYZIR
 #define PCL_NO_PRECOMPILE
 
-
 namespace pgf
 {
 /** Euclidean coordinate, including intensity and ring number. */
@@ -37,26 +36,11 @@ struct PointXYZIR
     uint16_t ring;                  // laser ring number
     EIGEN_MAKE_ALIGNED_OPERATOR_NEW // ensure proper alignment
 } EIGEN_ALIGN16;
-
-/** Euclidean coordinate, including intensity and ring number, and label. */
-struct PointXYZIRL
-{
-    PCL_ADD_POINT4D;                // quad-word XYZ
-    float intensity;                // laser intensity reading
-    uint16_t ring;                  // laser ring number
-    uint16_t label;                 // point label: 0u - no ground, 1u - ground
-    EIGEN_MAKE_ALIGNED_OPERATOR_NEW // ensure proper alignment
-} EIGEN_ALIGN16;
 };
-
 
 // Register custom point struct according to PCL
 // POINT_CLOUD_REGISTER_POINT_STRUCT(pgf::PointXYZIR, (float, x, x)(float, y, y)(float, z, z)(float, intensity, intensity)(uint16_t, ring, ring))
-POINT_CLOUD_REGISTER_POINT_STRUCT(pgf::PointXYZIR, (float, x, x)(float, y, y)(float, z, z))
-
-// Register custom point struct according to PCL
-// POINT_CLOUD_REGISTER_POINT_STRUCT(pgf::PointXYZIRL, (float, x, x)(float, y, y)(float, z, z)(float, intensity, intensity)(uint16_t, ring, ring)(uint16_t, label, label))
-POINT_CLOUD_REGISTER_POINT_STRUCT(pgf::PointXYZIRL, (float, x, x)(float, y, y)(float, z, z)(uint16_t, label, label))
+POINT_CLOUD_REGISTER_POINT_STRUCT(pgf::PointXYZIR, (float, x, x)(float, y, y)(float, z, z)(float, intensity, intensity))
 
 class PointsGroundFilter
 {
