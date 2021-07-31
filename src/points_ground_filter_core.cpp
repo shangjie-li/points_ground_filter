@@ -30,9 +30,11 @@ PointsGroundFilter::PointsGroundFilter(ros::NodeHandle& nh)
     ros::spin();
 }
 
-PointsGroundFilter::~PointsGroundFilter(){}
+PointsGroundFilter::~PointsGroundFilter()
+{
+}
 
-void PointsGroundFilter::convertPointCloud(const pcl::PointCloud<pcl::PointXYZ>::Ptr pc,
+void PointsGroundFilter::convertPointCloud(const pcl::PointCloud<pcl::PointXYZI>::Ptr pc,
                                            std::vector<std::vector<PointXYZRTColor>>& pc_converted)
 {
     // floor(x)返回小于或等于x的最大整数
@@ -144,7 +146,7 @@ void PointsGroundFilter::callback(const sensor_msgs::PointCloud2ConstPtr pc_msg)
 {
     ros::Time time_start = ros::Time::now();
     
-    pcl::PointCloud<pcl::PointXYZ>::Ptr pc_current(new pcl::PointCloud<pcl::PointXYZ>);
+    pcl::PointCloud<pcl::PointXYZI>::Ptr pc_current(new pcl::PointCloud<pcl::PointXYZI>);
     pcl::fromROSMsg(*pc_msg, *pc_current);
 
     // 组织点云
@@ -155,18 +157,18 @@ void PointsGroundFilter::callback(const sensor_msgs::PointCloud2ConstPtr pc_msg)
     pcl::PointIndices ground_indices, no_ground_indices;
     classifyPointCloud(pc_organized, ground_indices, no_ground_indices);
 
-    pcl::PointCloud<pcl::PointXYZ>::Ptr pc_ground(new pcl::PointCloud<pcl::PointXYZ>);
-    pcl::PointCloud<pcl::PointXYZ>::Ptr pc_no_ground(new pcl::PointCloud<pcl::PointXYZ>);
-    pcl::PointCloud<pcl::PointXYZ>::Ptr pc_ground_filtered(new pcl::PointCloud<pcl::PointXYZ>);
-    pcl::PointCloud<pcl::PointXYZ>::Ptr pc_no_ground_filtered(new pcl::PointCloud<pcl::PointXYZ>);
+    pcl::PointCloud<pcl::PointXYZI>::Ptr pc_ground(new pcl::PointCloud<pcl::PointXYZI>);
+    pcl::PointCloud<pcl::PointXYZI>::Ptr pc_no_ground(new pcl::PointCloud<pcl::PointXYZI>);
+    pcl::PointCloud<pcl::PointXYZI>::Ptr pc_ground_filtered(new pcl::PointCloud<pcl::PointXYZI>);
+    pcl::PointCloud<pcl::PointXYZI>::Ptr pc_no_ground_filtered(new pcl::PointCloud<pcl::PointXYZI>);
 
-    pcl::ExtractIndices<pcl::PointXYZ> extractor_ground;
+    pcl::ExtractIndices<pcl::PointXYZI> extractor_ground;
     extractor_ground.setInputCloud(pc_current);
     extractor_ground.setIndices(boost::make_shared<pcl::PointIndices>(ground_indices));
     extractor_ground.setNegative(false); // true removes the indices, false leaves only the indices
     extractor_ground.filter(*pc_ground);
 
-    pcl::ExtractIndices<pcl::PointXYZ> extractor_no_ground;
+    pcl::ExtractIndices<pcl::PointXYZI> extractor_no_ground;
     extractor_no_ground.setInputCloud(pc_current);
     extractor_no_ground.setIndices(boost::make_shared<pcl::PointIndices>(no_ground_indices));
     extractor_no_ground.setNegative(false); // true removes the indices, false leaves only the indices
@@ -175,7 +177,7 @@ void PointsGroundFilter::callback(const sensor_msgs::PointCloud2ConstPtr pc_msg)
     // 针对pc_ground滤波
     if(ground_filter_mode_)
     {
-        pcl::StatisticalOutlierRemoval<pcl::PointXYZ> statFilter_ground;
+        pcl::StatisticalOutlierRemoval<pcl::PointXYZI> statFilter_ground;
         statFilter_ground.setInputCloud(pc_ground);
         statFilter_ground.setMeanK(ground_meank_);
         statFilter_ground.setStddevMulThresh(ground_stdmul_);
@@ -186,7 +188,7 @@ void PointsGroundFilter::callback(const sensor_msgs::PointCloud2ConstPtr pc_msg)
     // 针对pc_no_ground滤波
     if(no_ground_filter_mode_)
     {
-        pcl::StatisticalOutlierRemoval<pcl::PointXYZ> statFilter_no_ground;
+        pcl::StatisticalOutlierRemoval<pcl::PointXYZI> statFilter_no_ground;
         statFilter_no_ground.setInputCloud(pc_no_ground);
         statFilter_no_ground.setMeanK(no_ground_meank_);
         statFilter_no_ground.setStddevMulThresh(no_ground_stdmul_);
@@ -213,17 +215,18 @@ void PointsGroundFilter::callback(const sensor_msgs::PointCloud2ConstPtr pc_msg)
     if(show_points_size_ || show_time_)
     {
         std::cout << "" << std::endl;
+        std::cout << "[points_ground_filter]" << std::endl;
     }
     
     if(show_points_size_)
     {
-        std::cout << "size of ground point clouds:" << pc_ground_filtered->points.size() << std::endl;
-        std::cout << "size of no ground point clouds:" << pc_no_ground_filtered->points.size() << std::endl;
+        std::cout << "Size of ground point clouds: " << pc_ground_filtered->points.size() << std::endl;
+        std::cout << "Size of no ground point clouds: " << pc_no_ground_filtered->points.size() << std::endl;
     }
 
     if(show_time_)
     {
-        std::cout << "cost time:" << time_end - time_start << "s" << std::endl;
+        std::cout << "Time cost per frame: " << time_end - time_start << "s" << std::endl;
     }
 }
 

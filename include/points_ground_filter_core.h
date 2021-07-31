@@ -50,18 +50,18 @@ private:
     
     struct PointXYZRTColor
     {
-        pcl::PointXYZ point;
+        pcl::PointXYZI point;
 
-        float radius; // radius to (0, 0).
-        float theta;  // polar angle in XY plane.
+        float radius; // radius to (0, 0)
+        float theta;  // polar angle in XY plane
 
         size_t radius_idx;
         size_t theta_idx;
 
-        size_t original_idx; // index in the original point clouds.
+        size_t original_idx; // index in the original point clouds
     };
     
-    void convertPointCloud(const pcl::PointCloud<pcl::PointXYZ>::Ptr pc,
+    void convertPointCloud(const pcl::PointCloud<pcl::PointXYZI>::Ptr pc,
                            std::vector<std::vector<PointXYZRTColor>>& pc_converted);
     
     void classifyPointCloud(const std::vector<std::vector<PointXYZRTColor>>& pc,
