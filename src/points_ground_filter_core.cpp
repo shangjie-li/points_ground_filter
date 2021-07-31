@@ -31,7 +31,9 @@ PointsGroundFilter::PointsGroundFilter(ros::NodeHandle& nh)
     ros::spin();
 }
 
-PointsGroundFilter::~PointsGroundFilter(){}
+PointsGroundFilter::~PointsGroundFilter()
+{
+}
 
 void PointsGroundFilter::convertPointCloud(const pcl::PointCloud<pcl::PointXYZI>::Ptr pc,
                                            std::vector<std::vector<std::vector<PointXYZICustom>>>& pc_converted)
@@ -227,17 +229,18 @@ void PointsGroundFilter::callback(const sensor_msgs::PointCloud2ConstPtr pc_msg)
     if(show_points_size_ || show_time_)
     {
         std::cout << "" << std::endl;
+        std::cout << "[points_ground_filter]" << std::endl;
     }
     
     if(show_points_size_)
     {
-        std::cout << "size of ground point clouds:" << pc_ground_filtered->points.size() << std::endl;
-        std::cout << "size of no ground point clouds:" << pc_no_ground_filtered->points.size() << std::endl;
+        std::cout << "Size of ground point clouds: " << pc_ground_filtered->points.size() << std::endl;
+        std::cout << "Size of no ground point clouds: " << pc_no_ground_filtered->points.size() << std::endl;
     }
 
     if(show_time_)
     {
-        std::cout << "cost time:" << time_end - time_start << "s" << std::endl;
+        std::cout << "Time cost per frame: " << time_end - time_start << "s" << std::endl;
     }
 }
 

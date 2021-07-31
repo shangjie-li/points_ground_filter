@@ -52,17 +52,16 @@ private:
     struct PointXYZICustom
     {
         pcl::PointXYZI point;
-        size_t original_idx; // index in the original point clouds.
+        size_t original_idx; // index in the original point clouds
     };
     
     void convertPointCloud(const pcl::PointCloud<pcl::PointXYZI>::Ptr pc,
                            std::vector<std::vector<std::vector<PointXYZICustom>>>& pc_converted);
-    
     void classifyPointCloud(const std::vector<std::vector<std::vector<PointXYZICustom>>>& pc,
                             pcl::PointIndices& ground_indices,
                             pcl::PointIndices& no_ground_indices);
-                        
     void callback(const sensor_msgs::PointCloud2ConstPtr pc_msg);
+    
 public:
     PointsGroundFilter(ros::NodeHandle& nh);
     ~PointsGroundFilter();
